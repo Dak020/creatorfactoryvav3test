@@ -127,6 +127,7 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        try {
         const token = botToken();
         const expectedSecret = webhookSecret(token);
         const actualSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") ?? "";
@@ -808,6 +809,10 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
         }
 
         return Response.json({ ok: true });
+        } catch (error) {
+          console.error("Telegram webhook processing failed:", error);
+          return Response.json({ ok: false }, { status: 500 });
+        }
       },
     },
   },

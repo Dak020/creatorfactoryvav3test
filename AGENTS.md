@@ -8,3 +8,5 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+Telegram webhook registration must derive the stable project host from the active preview or runtime project ID, so remixes do not keep calling the source project.
