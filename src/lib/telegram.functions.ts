@@ -1,11 +1,18 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-const PROJECT_ID = "81a2e896-1052-4241-8514-4dd7922129c6";
-
 function webhookHost(origin: string) {
-  if (origin.includes("id-preview--") || origin.includes("localhost")) {
-    return `https://project--${PROJECT_ID}-dev.lovable.app`;
+  try {
+    const url = new URL(origin);
+    const previewProjectId = url.hostname.match(
+      /^id-preview--([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.lovable\.app$/i,
+    )?.[1];
+
+    if (previewProjectId) {
+      return `https://project--${previewProjectId}-dev.lovable.app`;
+    }
+  } catch {
+    // An invalid origin must not prevent the settings page from explaining the issue.
   }
   return origin;
 }
