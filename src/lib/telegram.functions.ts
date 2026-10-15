@@ -1,15 +1,17 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-function webhookHost(origin: string) {
+function webhookHost(origin: string, projectId?: string) {
   try {
     const url = new URL(origin);
     const previewProjectId = url.hostname.match(
       /^id-preview--([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.lovable\.app$/i,
     )?.[1];
 
-    if (previewProjectId) {
-      return `https://project--${previewProjectId}-dev.lovable.app`;
+    const resolvedProjectId = previewProjectId ||
+      (url.hostname === "localhost" || url.hostname === "127.0.0.1" ? projectId : undefined);
+    if (resolvedProjectId) {
+      return `https://project--${resolvedProjectId}-dev.lovable.app`;
     }
   } catch {
     // An invalid origin must not prevent the settings page from explaining the issue.
@@ -35,6 +37,7 @@ export const connectTelegramFn = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { BOT_USERNAME, botKeyHash, botToken, tg, webhookSecret } = await import("@/lib/telegram/bot.server");
     const token = botToken();
+    const projectId = process.env["SUPABASE_PROJECT_ID"];
     const code = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
 
     const { error } = await context.supabase.from("telegram_links" as any).upsert(
@@ -44,7 +47,7 @@ export const connectTelegramFn = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
 
     await tg("setWebhook", {
-      url: `${webhookHost(data.origin)}/api/public/telegram/webhook`,
+      url: `${webhookHost(data.origin, projectId)}/api/public/telegram/webhook`,
       secret_token: webhookSecret(token),
       allowed_updates: ["message", "callback_query"],
     });
