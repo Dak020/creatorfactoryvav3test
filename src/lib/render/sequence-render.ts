@@ -519,9 +519,23 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-    if (AudioContextClass && (withAudio || soundtrackUrl)) {
+       if (AudioContextClass && (withAudio || soundtrackUrl)) {
       audioCtx = new AudioContextClass();
       const dest = audioCtx.createMediaStreamDestination();
+
+      // Silent keepalive: feeds continuous inaudible samples so Chromium's
+      // audio clock never starves during segment transitions, preventing empty recordings.
+      try {
+        const keepaliveOsc = audioCtx.createOscillator();
+        const keepaliveGain = audioCtx.createGain();
+        keepaliveGain.gain.value = 0.00001;
+        keepaliveOsc.connect(keepaliveGain);
+        keepaliveGain.connect(dest);
+        keepaliveOsc.start();
+      } catch {
+        /* ignore keepalive fallback */
+      }
+
       let hasSource = false;
 
       if (withAudio) {
@@ -535,6 +549,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
           }
         });
       }
+
 
       if (soundtrackUrl) {
         try {
@@ -691,6 +706,11 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       signal.addEventListener("abort", () => stop(new RenderCancelledError()), { once: true });
     }
 
+       // Resume audio context FIRST before starting recorder so stream clock is running
+    if (audioCtx && audioCtx.state === "suspended") {
+      void audioCtx.resume();
+    }
+
     try {
       recorder.start(100);
     } catch (e) {
@@ -698,9 +718,6 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       return;
     }
 
-    if (audioCtx && audioCtx.state === "suspended") {
-      void audioCtx.resume();
-    }
     if (soundtrackElement) {
       soundtrackElement.currentTime = 0;
       void soundtrackElement.play().catch(() => {});
