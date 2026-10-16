@@ -287,23 +287,44 @@ export function RenderWorker() {
 
         toast.loading("Uploading rendered video...", { id: toastId });
 
-        // 4. Upload rendered video to storage
+        // 4. Upload rendered video to storage (with timeout so it can't hang forever)
+        const withTimeout = <T,>(p: PromiseLike<T>, ms: number, label: string) =>
+          Promise.race([
+            Promise.resolve(p),
+            new Promise<never>((_, rej) =>
+              setTimeout(() => rej(new Error(`${label} timed out`)), ms),
+            ),
+          ]);
+        await supabase.from("render_jobs").update({ progress: 90 }).eq("id", job.id);
         const outPath = `${job.user_id}/${job.id}.${extension}`;
-        const { error: uploadErr } = await supabase.storage
-          .from(RENDER_BUCKET)
-          .upload(outPath, blob, { contentType: mimeType, upsert: true });
+        const { error: uploadErr } = await withTimeout(
+          supabase.storage
+            .from(RENDER_BUCKET)
+            .upload(outPath, blob, { contentType: mimeType, upsert: true }),
+          120_000,
+          "Video upload",
+        );
 
         if (uploadErr) {
           throw new Error(`Upload failed: ${uploadErr.message}`);
         }
+        await supabase.from("render_jobs").update({ progress: 95 }).eq("id", job.id);
 
         let thumbPath: string | null = null;
         if (thumbnail && thumbnail.size > 0) {
           thumbPath = `${job.user_id}/${job.id}.jpg`;
-          const { error: thumbErr } = await supabase.storage
-            .from(RENDER_BUCKET)
-            .upload(thumbPath, thumbnail, { contentType: "image/jpeg", upsert: true });
-          if (thumbErr) thumbPath = null;
+          try {
+            const { error: thumbErr } = await withTimeout(
+              supabase.storage
+                .from(RENDER_BUCKET)
+                .upload(thumbPath, thumbnail, { contentType: "image/jpeg", upsert: true }),
+              30_000,
+              "Thumbnail upload",
+            );
+            if (thumbErr) thumbPath = null;
+          } catch {
+            thumbPath = null;
+          }
         }
 
         // 5. Save & Approval Handling:
