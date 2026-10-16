@@ -634,7 +634,6 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       if (stopped) return;
       stopped = true;
       if (timer !== null) clearInterval(timer);
-
       if (recorder.state !== "inactive") {
         recorder.onstop = () => {
           doCleanup();
@@ -657,6 +656,12 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
             resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
           }
         }, 4000);
+
+        try {
+          recorder.requestData?.();
+        } catch {
+          /* ignore */
+        }
 
         try {
           recorder.stop();
