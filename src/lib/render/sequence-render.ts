@@ -622,30 +622,39 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       stopped = true;
       if (timer !== null) clearInterval(timer);
 
-      // Force release all native hardware decoders immediately
-      prepared.forEach((p) => releaseVideoDecoder(p.video));
-      cleanupAudio();
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        // Release decoders/audio only AFTER the recorder has flushed its data.
+        prepared.forEach((p) => releaseVideoDecoder(p.video));
+        cleanupAudio();
+        if (err) {
+          reject(err);
+        } else if (chunks.length === 0) {
+          reject(new Error("Recorder produced no data"));
+        } else {
+          const blob = new Blob(chunks, { type: mimeType });
+          resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
+        }
+      };
 
       if (recorder.state !== "inactive") {
-        recorder.onstop = () => {
-          if (err) {
-            reject(err);
-          } else {
-            const blob = new Blob(chunks, { type: mimeType });
-            resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
-          }
-        };
+        recorder.onstop = () => setTimeout(finish, 0);
+        // Watchdog: if the browser never fires onstop, finalize with what we have.
+        setTimeout(finish, 8000);
+        try {
+          recorder.requestData?.();
+        } catch {
+          /* ignore */
+        }
         try {
           recorder.stop();
-        } catch (recStopErr) {
-          if (err) reject(err);
-          else reject(recStopErr as Error);
+        } catch {
+          finish();
         }
-      } else if (err) {
-        reject(err);
       } else {
-        const blob = new Blob(chunks, { type: mimeType });
-        resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
+        finish();
       }
     };
 

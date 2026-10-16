@@ -577,33 +577,36 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
       if (stopped) return;
       stopped = true;
       if (timer !== null) clearInterval(timer);
-      try {
-        video.pause();
-      } catch {
-        /* ignore */
-      }
-      cleanupAudio();
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        try {
+          video.pause();
+        } catch {
+          /* ignore */
+        }
+        cleanupAudio();
+        if (err) reject(err);
+        else if (chunks.length === 0) reject(new Error("Recorder produced no data"));
+        else resolve({ blob: new Blob(chunks, { type: mimeType }), extension, mimeType, thumbnail });
+      };
 
       if (recorder.state !== "inactive") {
-        recorder.onstop = () => {
-          if (err) {
-            reject(err);
-          } else {
-            const blob = new Blob(chunks, { type: mimeType });
-            resolve({ blob, extension, mimeType, thumbnail });
-          }
-        };
+        recorder.onstop = () => setTimeout(finish, 0);
+        setTimeout(finish, 8000);
+        try {
+          recorder.requestData?.();
+        } catch {
+          /* ignore */
+        }
         try {
           recorder.stop();
-        } catch (recStopErr) {
-          if (err) reject(err);
-          else reject(recStopErr as Error);
+        } catch {
+          finish();
         }
-      } else if (err) {
-        reject(err);
       } else {
-        const blob = new Blob(chunks, { type: mimeType });
-        resolve({ blob, extension, mimeType, thumbnail });
+        finish();
       }
     };
 
