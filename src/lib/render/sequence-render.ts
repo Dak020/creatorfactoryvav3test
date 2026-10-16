@@ -617,44 +617,64 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
     let totalPlayedDuration = 0;
     let switchingSeg = false;
 
+    let watchdog: number | null = null;
+
+    const doCleanup = () => {
+      if (watchdog !== null) {
+        clearTimeout(watchdog);
+        watchdog = null;
+      }
+      try {
+        prepared.forEach((p) => releaseVideoDecoder(p.video));
+      } catch {
+        /* ignore */
+      }
+      cleanupAudio();
+    };
+
     const stop = (err?: Error) => {
       if (stopped) return;
       stopped = true;
       if (timer !== null) clearInterval(timer);
 
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        // Release decoders/audio only AFTER the recorder has flushed its data.
-        prepared.forEach((p) => releaseVideoDecoder(p.video));
-        cleanupAudio();
+      if (recorder.state !== "inactive") {
+        recorder.onstop = () => {
+          doCleanup();
+          if (err) {
+            reject(err);
+          } else {
+            const blob = new Blob(chunks, { type: mimeType });
+            resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
+          }
+        };
+
+        // 4-second watchdog: if recorder.stop() deadlocks, force finalize with captured chunks
+        watchdog = window.setTimeout(() => {
+          console.warn("MediaRecorder onstop timed out; forcing resolution with recorded chunks");
+          doCleanup();
+          if (err) {
+            reject(err);
+          } else {
+            const blob = new Blob(chunks, { type: mimeType });
+            resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
+          }
+        }, 4000);
+
+        try {
+          recorder.stop();
+        } catch (recStopErr) {
+          doCleanup();
+          if (err) reject(err);
+          else reject(recStopErr as Error);
+        }
+      } else {
+        doCleanup();
         if (err) {
           reject(err);
-        } else if (chunks.length === 0) {
-          reject(new Error("Recorder produced no data"));
         } else {
           const blob = new Blob(chunks, { type: mimeType });
           resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
         }
-      };
-
-      if (recorder.state !== "inactive") {
-        recorder.onstop = () => setTimeout(finish, 0);
-        // Watchdog: if the browser never fires onstop, finalize with what we have.
-        setTimeout(finish, 8000);
-        try {
-          recorder.requestData?.();
-        } catch {
-          /* ignore */
-        }
-        try {
-          recorder.stop();
-        } catch {
-          finish();
-        }
-      } else {
-        finish();
       }
     };
 
