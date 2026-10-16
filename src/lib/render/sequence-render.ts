@@ -205,18 +205,16 @@ function drawOverlay(
 
   ctx.restore();
 }
-
 function pickSupportedMimeType(): string {
   if (typeof MediaRecorder === "undefined") {
     return "video/webm";
   }
   const candidates = [
-    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-    "video/mp4",
-    "video/webm;codecs=h264,opus",
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm",
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4",
   ];
   for (const c of candidates) {
     if (MediaRecorder.isTypeSupported(c)) return c;
