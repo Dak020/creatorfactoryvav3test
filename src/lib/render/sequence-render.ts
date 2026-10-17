@@ -609,7 +609,12 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
     ...audioTracks,
   ]);
 
-  const mimeType = pickSupportedMimeType();
+  let mimeType = pickSupportedMimeType();
+  // Requesting an audio codec with no audio track can yield empty output in some browsers.
+  if (audioTracks.length === 0 && mimeType.includes(",")) {
+    const videoOnly = mimeType.replace(/,\s*(opus|mp4a[^"]*)/, "");
+    if (MediaRecorder.isTypeSupported(videoOnly)) mimeType = videoOnly;
+  }
   const extension = mimeType.includes("mp4") ? "mp4" : "webm";
   const recorder = new MediaRecorder(combinedStream, {
     mimeType,
@@ -650,27 +655,30 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       stopped = true;
       if (timer !== null) clearInterval(timer);
       if (recorder.state !== "inactive") {
-        recorder.onstop = () => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
           doCleanup();
           if (err) {
             reject(err);
-          } else {
-            const blob = new Blob(chunks, { type: mimeType });
-            resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
+            return;
           }
+          const blob = new Blob(chunks, { type: mimeType });
+          if (blob.size === 0) {
+            reject(new Error("Recorder produced no data. Keep this tab open and in front while rendering, then retry."));
+            return;
+          }
+          resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
         };
+        // Let the final ondataavailable chunk land before assembling the blob.
+        recorder.onstop = () => window.setTimeout(finish, 50);
 
-        // 4-second watchdog: if recorder.stop() deadlocks, force finalize with captured chunks
+        // Watchdog: if recorder.stop() deadlocks, finalize with captured chunks
         watchdog = window.setTimeout(() => {
           console.warn("MediaRecorder onstop timed out; forcing resolution with recorded chunks");
-          doCleanup();
-          if (err) {
-            reject(err);
-          } else {
-            const blob = new Blob(chunks, { type: mimeType });
-            resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
-          }
-        }, 4000);
+          finish();
+        }, 10000);
 
         try {
           recorder.requestData?.();

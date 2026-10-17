@@ -159,484 +159,425 @@ function layoutOverlay(
   }
 
   ctx.font = fontFor(fontSize);
-  const lineHeight = fontSize * 1.22;
-  const totalTextHeight = lines.length * lineHeight;
+  const lineHeight = Math.round(fontSize * 1.25);
+  const lineGap = Math.round(fontSize * 0.15);
+  const totalHeight = lines.length * lineHeight + (lines.length - 1) * lineGap;
 
   let startY: number;
   if (placement === "top") {
     startY = Math.round(canvasHeight * 0.16);
   } else if (placement === "middle") {
-    startY = Math.round((canvasHeight - totalTextHeight) / 2);
+    startY = Math.round((canvasHeight - totalHeight) / 2);
   } else {
-    startY = Math.round(canvasHeight * 0.76 - totalTextHeight);
+    startY = Math.round(canvasHeight * 0.72 - totalHeight);
   }
 
-  const wrapped: WrappedLine[] = lines.map((text, idx) => ({
-    text,
-    x: Math.round(canvasWidth / 2),
-    y: Math.round(startY + idx * lineHeight),
-  }));
+  const wrapped: WrappedLine[] = [];
+  let currentY = startY;
+
+  for (const line of lines) {
+    const textX = Math.round(canvasWidth / 2);
+    const textY = currentY + Math.round(fontSize * 0.88);
+
+    wrapped.push({
+      text: line,
+      x: textX,
+      y: textY,
+    });
+
+    currentY += lineHeight + lineGap;
+  }
 
   return { lines: wrapped, fontSize };
 }
 
-function drawBackground(
+function drawOverlay(
   ctx: CanvasRenderingContext2D,
-  lines: WrappedLine[],
-  fontSize: number,
-  canvasWidth: number,
-  canvasHeight: number,
-  styleKey?: string,
+  overlay: OverlayLayout,
+  fontString: string,
 ) {
-  if (!lines.length) return;
-  const key = (styleKey ?? "").toLowerCase();
-  const lineHeight = fontSize * 1.22;
-  const paddingX = Math.round(fontSize * 0.45);
-  const paddingY = Math.round(fontSize * 0.22);
-  const radius = Math.round(fontSize * 0.24);
-
-  if (key.includes("pill") || key.includes("badge") || key.includes("box")) {
-    ctx.save();
-    ctx.fillStyle = key.includes("white")
-      ? "rgba(255,255,255,0.92)"
-      : key.includes("yellow")
-        ? "rgba(250,204,21,0.95)"
-        : "rgba(10,10,12,0.85)";
-
-    for (const line of lines) {
-      const w = ctx.measureText(line.text).width;
-      const x = line.x - w / 2 - paddingX;
-      const y = line.y - paddingY;
-      const boxW = w + paddingX * 2;
-      const boxH = lineHeight + paddingY * 0.6;
-      ctx.beginPath();
-      ctx.roundRect(x, y, boxW, boxH, radius);
-      ctx.fill();
-    }
-    ctx.restore();
-    return;
-  }
-
-  if (key.includes("gradient") || key.includes("tint") || key.includes("vignette")) {
-    ctx.save();
-    const firstY = lines[0].y - fontSize;
-    const lastY = lines[lines.length - 1].y + lineHeight;
-    const grad = ctx.createLinearGradient(0, firstY - 80, 0, lastY + 80);
-    grad.addColorStop(0, "rgba(0,0,0,0)");
-    grad.addColorStop(0.3, "rgba(0,0,0,0.7)");
-    grad.addColorStop(0.7, "rgba(0,0,0,0.7)");
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, firstY - 80, canvasWidth, lastY - firstY + 160);
-    ctx.restore();
-    return;
-  }
-}
-
-function drawTextOverlay(
-  ctx: CanvasRenderingContext2D,
-  layout: OverlayLayout,
-  textColor: string = "#ffffff",
-) {
-  const { lines, fontSize } = layout;
-  if (!lines.length) return;
+  if (!overlay.lines.length) return;
 
   ctx.save();
-  ctx.font = fontFor(fontSize);
+  ctx.font = fontString;
   ctx.textAlign = "center";
-  ctx.textBaseline = "top";
+  ctx.textBaseline = "alphabetic";
+  ctx.lineJoin = "round";
+  ctx.miterLimit = 2;
 
-  const strokeWidth = Math.max(3, Math.round(fontSize * 0.1));
-  const isLightText = textColor.toLowerCase() === "#ffffff" || textColor.toLowerCase() === "white";
+  const strokeWidth = Math.max(6, Math.round(overlay.fontSize * 0.16));
 
-  for (const line of lines) {
-    if (isLightText) {
-      ctx.shadowColor = "rgba(0, 0, 0, 0.9)";
-      ctx.shadowBlur = Math.round(fontSize * 0.28);
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = Math.round(fontSize * 0.05);
+  // 1. Thick crisp black outline with subtle shadow
+  ctx.lineWidth = strokeWidth;
+  ctx.strokeStyle = "#000000";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+  ctx.shadowBlur = Math.round(overlay.fontSize * 0.15);
+  ctx.shadowOffsetY = Math.round(overlay.fontSize * 0.05);
 
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
-      ctx.lineWidth = strokeWidth;
-      ctx.lineJoin = "round";
-      ctx.miterLimit = 2;
-      ctx.strokeText(line.text, line.x, line.y);
-    }
+  for (const line of overlay.lines) {
+    ctx.strokeText(line.text, line.x, line.y);
+  }
 
-    ctx.fillStyle = textColor;
+  // 2. Bold white fill on top
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.fillStyle = "#ffffff";
+
+  for (const line of overlay.lines) {
     ctx.fillText(line.text, line.x, line.y);
   }
+
   ctx.restore();
 }
 
-function pickSupportedMimeType(): { mimeType: string; extension: string } {
+function pickSupportedMimeType(): string {
   if (typeof MediaRecorder === "undefined") {
-    return { mimeType: "video/webm", extension: "webm" };
+    return "video/webm";
   }
   const candidates = [
-    { mimeType: "video/webm;codecs=vp9,opus", extension: "webm" },
-    { mimeType: "video/webm;codecs=vp8,opus", extension: "webm" },
-    { mimeType: "video/webm", extension: "webm" },
-    { mimeType: "video/mp4;codecs=avc1,mp4a.40.2", extension: "mp4" },
-    { mimeType: "video/mp4", extension: "mp4" },
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4",
+    "video/webm;codecs=h264,opus",
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
   ];
-
   for (const c of candidates) {
-    if (MediaRecorder.isTypeSupported(c.mimeType)) {
-      return c;
-    }
+    if (MediaRecorder.isTypeSupported(c)) return c;
   }
-  return { mimeType: "video/webm", extension: "webm" };
+  return "video/webm";
 }
 
-function drawCover(
-  ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
-  targetW: number,
-  targetH: number,
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new RenderCancelledError();
+}
+
+function waitFor(
+  el: HTMLVideoElement,
+  event: string,
+  opts?: { signal?: AbortSignal | undefined; timeoutMs?: number },
 ) {
-  const vw = video.videoWidth || targetW;
-  const vh = video.videoHeight || targetH;
-  const targetRatio = targetW / targetH;
-  const videoRatio = vw / vh;
-
-  let sx = 0;
-  let sy = 0;
-  let sWidth = vw;
-  let sHeight = vh;
-
-  if (videoRatio > targetRatio) {
-    sWidth = vh * targetRatio;
-    sx = (vw - sWidth) / 2;
-  } else {
-    sHeight = vw / targetRatio;
-    sy = (vh - sHeight) / 2;
-  }
-
-  ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetW, targetH);
-}
-
-function seekTo(video: HTMLVideoElement, targetTime: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let resolved = false;
-
-    const onSeeked = () => {
-      if (resolved) return;
-      resolved = true;
-      cleanup();
-      resolve();
-    };
-
-    const onError = () => {
-      if (resolved) return;
-      resolved = true;
-      cleanup();
-      reject(new Error("Video seek failed"));
-    };
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
 
     const cleanup = () => {
-      video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("error", onError);
-      clearTimeout(timer);
+      clearTimeout(timeout);
+      el.removeEventListener(event, ok);
+      el.removeEventListener("error", fail);
+      opts?.signal?.removeEventListener("abort", onAbort);
     };
 
-    video.addEventListener("seeked", onSeeked, { once: true });
-    video.addEventListener("error", onError, { once: true });
-
-    const timer = setTimeout(() => {
-      if (resolved) return;
-      resolved = true;
+    const ok = () => {
+      if (settled) return;
+      settled = true;
       cleanup();
       resolve();
-    }, 2500);
+    };
 
-    try {
-      video.currentTime = targetTime;
-    } catch (e) {
+    const fail = () => {
+      if (settled) return;
+      settled = true;
       cleanup();
-      reject(e);
-    }
-  });
-}
-
-function loadVideoElement(
-  sourceUrl: string,
-  withAudio: boolean,
-  signal?: AbortSignal,
-): Promise<HTMLVideoElement> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      return reject(new RenderCancelledError());
-    }
-
-    const video = document.createElement("video");
-    video.crossOrigin = "anonymous";
-    video.playsInline = true;
-    video.preload = "auto";
-    video.muted = !withAudio;
-    video.volume = withAudio ? 1.0 : 0;
+      const errCode = el.error
+        ? ` (code ${el.error.code}: ${el.error.message || "media decode/network error"})`
+        : "";
+      reject(new Error(`Video failed to ${event}${errCode}. Check clip format or CORS permissions.`));
+    };
 
     const onAbort = () => {
+      if (settled) return;
+      settled = true;
       cleanup();
+      reject(new RenderCancelledError());
+    };
+
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const errDetail = el.error
+        ? ` (media error code ${el.error.code}: ${el.error.message})`
+        : ` (readyState: ${el.readyState}, networkState: ${el.networkState})`;
+      reject(new Error(`Timed out waiting for the clip to ${event}${errDetail}. Verify the video codec is H.264 MP4.`));
+    }, opts?.timeoutMs ?? (event === "loadedmetadata" ? 90_000 : 45_000));
+
+    if (opts?.signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    if (
+      (event === "loadedmetadata" && el.readyState >= 1) ||
+      (event === "loadeddata" && el.readyState >= 2) ||
+      (event === "canplay" && el.readyState >= 3) ||
+      (event === "seeked" && !el.seeking && el.readyState >= 2)
+    ) {
+      ok();
+      return;
+    }
+
+    el.addEventListener(event, ok, { once: true });
+    el.addEventListener("error", fail, { once: true });
+    opts?.signal?.addEventListener("abort", onAbort, { once: true });
+
+    // Only kick off loading if nothing has started yet — calling load() again
+    // resets the element and aborts in-progress downloads/seeks (Safari).
+    if (el.networkState === 0 /* NETWORK_EMPTY */) {
       try {
-        video.pause();
-        video.removeAttribute("src");
-        video.load();
+        el.load();
       } catch {
         /* ignore */
       }
-      reject(new RenderCancelledError());
-    };
+    }
+  });
+}
 
-    const onLoaded = () => {
-      cleanup();
-      resolve(video);
-    };
-
-    const onError = () => {
-      cleanup();
-      reject(new Error("Failed to load source video for rendering"));
-    };
-
+async function seekVideo(video: HTMLVideoElement, targetTime: number, signal?: AbortSignal): Promise<void> {
+  if (Math.abs(video.currentTime - targetTime) < 0.05) {
+    return;
+  }
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
     const cleanup = () => {
-      video.removeEventListener("loadeddata", onLoaded);
+      clearTimeout(timer);
+      video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("error", onError);
       signal?.removeEventListener("abort", onAbort);
-      clearTimeout(timer);
     };
+    const onSeeked = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new RenderCancelledError());
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    }, 4000);
 
-    video.addEventListener("loadeddata", onLoaded, { once: true });
+    video.addEventListener("seeked", onSeeked, { once: true });
     video.addEventListener("error", onError, { once: true });
     signal?.addEventListener("abort", onAbort, { once: true });
 
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("Loading source video timed out after 15 seconds"));
-    }, 15000);
-
-    video.src = sourceUrl;
-    video.load();
-  });
-}
-
-function loadAudioElement(sourceUrl: string, signal?: AbortSignal): Promise<HTMLAudioElement> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new RenderCancelledError());
-
-    const audio = new Audio();
-    audio.crossOrigin = "anonymous";
-    audio.preload = "auto";
-
-    const onAbort = () => {
-      cleanup();
-      audio.pause();
-      audio.removeAttribute("src");
-      reject(new RenderCancelledError());
-    };
-
-    const onLoaded = () => {
-      cleanup();
-      resolve(audio);
-    };
-
-    const onError = () => {
-      cleanup();
-      reject(new Error("Failed to load soundtrack audio"));
-    };
-
-    const cleanup = () => {
-      audio.removeEventListener("canplaythrough", onLoaded);
-      audio.removeEventListener("error", onError);
-      signal?.removeEventListener("abort", onAbort);
-      clearTimeout(timer);
-    };
-
-    audio.addEventListener("canplaythrough", onLoaded, { once: true });
-    audio.addEventListener("error", onError, { once: true });
-    signal?.addEventListener("abort", onAbort, { once: true });
-
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("Soundtrack audio timed out loading after 12s"));
-    }, 12000);
-
-    audio.src = sourceUrl;
-    audio.load();
-  });
-}
-
-export async function renderVariant(options: BrowserRenderOptions): Promise<BrowserRenderResult> {
-  const {
-    sourceUrl,
-    startSeconds,
-    durationSeconds,
-    width,
-    height,
-    text,
-    placement = "top",
-    textColor = "#ffffff",
-    backgroundColor,
-    withAudio = true,
-    soundtrackUrl,
-    soundtrackVolume = 0.8,
-    onProgress,
-    signal,
-  } = options;
-
-  if (signal?.aborted) {
-    throw new RenderCancelledError();
-  }
-
-  // 1. Prepare video element
-  const video = await loadVideoElement(sourceUrl, withAudio, signal);
-
-  // 1b. Prepare optional external soundtrack
-  let soundtrackAudio: HTMLAudioElement | null = null;
-  if (soundtrackUrl) {
     try {
-      soundtrackAudio = await loadAudioElement(soundtrackUrl, signal);
-    } catch (e) {
-      console.warn("Could not load external soundtrack, continuing with video audio:", e);
+      video.currentTime = targetTime;
+    } catch {
+      cleanup();
+      resolve();
     }
+  });
+}
+
+export async function renderVariant(opts: BrowserRenderOptions): Promise<BrowserRenderResult> {
+  const { sourceUrl, durationSeconds, width, height, text, withAudio, soundtrackUrl, signal } = opts;
+  throwIfAborted(signal);
+
+  try {
+    if (typeof document !== "undefined" && "fonts" in document) {
+      await document.fonts.load(fontFor(64));
+      await document.fonts.ready;
+    }
+  } catch {
+    /* fallback cleanly */
   }
 
-  // 2. Prepare offscreen canvas
+  const video = document.createElement("video");
+  video.crossOrigin = "anonymous";
+  video.muted = !withAudio;
+  video.volume = 1;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = sourceUrl;
+  try {
+    video.load();
+  } catch {
+    /* ignore */
+  }
+
+  await waitFor(video, "loadedmetadata", { signal });
+
+  const sourceDuration = Number.isFinite(video.duration) ? video.duration : durationSeconds;
+  const maxStart = Math.max(0, sourceDuration - durationSeconds);
+  const start = Math.min(Math.max(0, opts.startSeconds), maxStart);
+
+  await seekVideo(video, start, signal);
+
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext("2d", { alpha: false });
-  if (!ctx) {
-    throw new Error("Could not get 2D rendering context");
-  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not available in this browser.");
 
-  // 3. Precalculate text overlay layout
-  const layout = layoutOverlay(ctx, text, width, height, placement);
+  const overlay = layoutOverlay(ctx, text.trim() || "…", width, height, opts.placement ?? "top");
+  const drawFont = fontFor(overlay.fontSize);
 
-  // 4. Seek to requested start offset
-  const safeStart = Math.max(0, Math.min(startSeconds, Math.max(0, (video.duration || 10) - 1)));
-  await seekTo(video, safeStart);
+  const drawFrame = () => {
+    const vw = video.videoWidth || width;
+    const vh = video.videoHeight || height;
+    const scale = Math.max(width / vw, height / vh);
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const dx = (width - dw) / 2;
+    const dy = (height - dh) / 2;
 
-  // Capture thumbnail at frame 0
-  drawCover(ctx, video, width, height);
-  drawBackground(ctx, layout.lines, layout.fontSize, width, height, backgroundColor);
-  drawTextOverlay(ctx, layout, textColor);
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, width, height);
 
-  let thumbnail: Blob | undefined;
-  try {
-    thumbnail = await new Promise<Blob | undefined>((resolve) => {
-      canvas.toBlob((b) => resolve(b || undefined), "image/jpeg", 0.85);
-    });
-  } catch {
-    /* ignore thumbnail failure */
-  }
+    try {
+      ctx.drawImage(video, dx, dy, dw, dh);
+    } catch {
+      // ignore empty frames
+    }
 
-  // 5. Setup capture stream & MediaRecorder with optional audio
-  const canvasStream = canvas.captureStream(30);
-  const combinedStream = new MediaStream();
+    drawOverlay(ctx, overlay, drawFont);
+  };
 
-  canvasStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track));
+  drawFrame();
+
+  const thumbnail: Blob | undefined = await new Promise((res) => {
+    canvas.toBlob((b) => res(b ?? undefined), "image/jpeg", 0.85);
+  });
+
+  const fps = 30;
+  const canvasStream = canvas.captureStream(fps);
 
   let audioCtx: AudioContext | null = null;
-  let videoSourceNode: MediaElementAudioSourceNode | null = null;
-  let soundtrackSourceNode: MediaElementAudioSourceNode | null = null;
+  let soundtrackElement: HTMLAudioElement | null = null;
+  const audioTracks: MediaStreamTrack[] = [];
 
   const cleanupAudio = () => {
     try {
-      if (videoSourceNode) {
-        videoSourceNode.disconnect();
-        videoSourceNode = null;
-      }
-      if (soundtrackSourceNode) {
-        soundtrackSourceNode.disconnect();
-        soundtrackSourceNode = null;
-      }
+      soundtrackElement?.pause();
+      if (soundtrackElement) soundtrackElement.src = "";
+    } catch {
+      /* ignore */
+    }
+    try {
       if (audioCtx && audioCtx.state !== "closed") {
         void audioCtx.close();
-        audioCtx = null;
       }
     } catch {
       /* ignore */
     }
   };
 
-  if (withAudio || soundtrackAudio) {
-    try {
-      const AudioContextClass =
-        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioContextClass) {
-        audioCtx = new AudioContextClass();
-        const dest = audioCtx.createMediaStreamDestination();
+  try {
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-        // Mix video's original audio if present
-        if (withAudio) {
-          try {
-            const videoSource = audioCtx.createMediaElementSource(video);
-            videoSourceNode = videoSource;
-            const originalGain = audioCtx.createGain();
-            // Duck original audio slightly if custom soundtrack is active
-            originalGain.gain.value = soundtrackAudio ? 0.35 : 1.0;
-            videoSource.connect(originalGain);
-            originalGain.connect(dest);
-          } catch (e) {
-            console.warn("Could not capture original video audio track (CORS or silent clip):", e);
-          }
+    if (AudioContextClass && (withAudio || soundtrackUrl)) {
+      audioCtx = new AudioContextClass();
+      const dest = audioCtx.createMediaStreamDestination();
+      let hasSource = false;
+
+      if (withAudio) {
+        try {
+          const videoSource = audioCtx.createMediaElementSource(video);
+          videoSource.connect(dest);
+          hasSource = true;
+        } catch (e) {
+          console.warn("Could not capture video audio source", e);
         }
-
-        // Mix soundtrack if present
-        if (soundtrackAudio) {
-          try {
-            const trackSource = audioCtx.createMediaElementSource(soundtrackAudio);
-            soundtrackSourceNode = trackSource;
-            const trackGain = audioCtx.createGain();
-            trackGain.gain.value = Math.max(0, Math.min(1, soundtrackVolume));
-            trackSource.connect(trackGain);
-            trackGain.connect(dest);
-          } catch (e) {
-            console.warn("Could not connect soundtrack source to audio destination:", e);
-          }
-        }
-
-        dest.stream.getAudioTracks().forEach((track) => combinedStream.addTrack(track));
       }
-    } catch (e) {
-      console.warn("Web Audio mixing failed, falling back to silent/canvas video:", e);
+
+      if (soundtrackUrl) {
+        try {
+          const audio = new Audio();
+          audio.crossOrigin = "anonymous";
+          audio.preload = "auto";
+          audio.src = soundtrackUrl;
+          audio.volume = Math.max(0, Math.min(1, opts.soundtrackVolume ?? 1));
+          soundtrackElement = audio;
+
+          await new Promise<void>((resolve, reject) => {
+            const ok = () => {
+              cleanup();
+              resolve();
+            };
+            const fail = () => {
+              cleanup();
+              reject(new Error("Failed to load soundtrack."));
+            };
+            const timeout = setTimeout(() => {
+              cleanup();
+              reject(new Error("Timed out loading soundtrack."));
+            }, 20_000);
+            const cleanup = () => {
+              clearTimeout(timeout);
+              audio.removeEventListener("canplaythrough", ok);
+              audio.removeEventListener("error", fail);
+            };
+            audio.addEventListener("canplaythrough", ok, { once: true });
+            audio.addEventListener("error", fail, { once: true });
+            try {
+              audio.load();
+            } catch {
+              /* ignore */
+            }
+          });
+
+          audio.currentTime = 0;
+          const trackSource = audioCtx.createMediaElementSource(audio);
+          trackSource.connect(dest);
+          hasSource = true;
+        } catch (soundtrackErr) {
+          console.warn("Could not bind soundtrack track; proceeding without it:", soundtrackErr);
+        }
+      }
+
+      if (hasSource) {
+        dest.stream.getAudioTracks().forEach((t) => audioTracks.push(t));
+      }
     }
+  } catch (err) {
+    console.warn("Audio pipeline init failed; rendering video-only stream:", err);
   }
 
-  const { mimeType, extension } = pickSupportedMimeType();
-  const chunks: BlobPart[] = [];
+  const combinedStream = new MediaStream([
+    ...canvasStream.getVideoTracks(),
+    ...audioTracks,
+  ]);
 
+  const mimeType = pickSupportedMimeType();
+  const extension = mimeType.includes("mp4") ? "mp4" : "webm";
   const recorder = new MediaRecorder(combinedStream, {
     mimeType,
-    videoBitsPerSecond: 4_500_000,
+    videoBitsPerSecond: 6_000_000,
   });
 
+  const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) {
-      chunks.push(e.data);
-    }
+    if (e.data && e.data.size > 0) chunks.push(e.data);
   };
 
+  const endSeconds = start + durationSeconds;
+  const intervalMs = 1000 / fps;
+
   return new Promise<BrowserRenderResult>((resolve, reject) => {
-    let animId: number | null = null;
-    let settled = false;
+    let timer: number | null = null;
+    let stopped = false;
 
-    const stop = (err?: Error) => {
-      if (settled) return;
-      if (animId !== null) {
-        cancelAnimationFrame(animId);
-        animId = null;
-      }
-
-      if (soundtrackAudio) {
-        try {
-          soundtrackAudio.pause();
-          soundtrackAudio.currentTime = 0;
-        } catch {
-          /* ignore */
-        }
-      }
-
+    const stop = async (err?: Error) => {
+      if (stopped) return;
+      stopped = true;
+      if (timer !== null) clearInterval(timer);
+      let settled = false;
       const finish = () => {
         if (settled) return;
         settled = true;
@@ -679,45 +620,38 @@ export async function renderVariant(options: BrowserRenderOptions): Promise<Brow
       signal.addEventListener("abort", () => stop(new RenderCancelledError()), { once: true });
     }
 
-    // 6. Play and record frame by frame
-    recorder.start(250);
+    try {
+      recorder.start(100);
+    } catch (e) {
+      stop(e as Error);
+      return;
+    }
 
-    // Resume AudioContext if suspended by browser autoplay policy
     if (audioCtx && audioCtx.state === "suspended") {
       void audioCtx.resume();
     }
-
-    if (soundtrackAudio) {
-      soundtrackAudio.currentTime = 0;
-      soundtrackAudio.play().catch(() => {});
+    if (soundtrackElement) {
+      soundtrackElement.currentTime = 0;
+      void soundtrackElement.play().catch(() => {});
     }
 
-    video.play().catch((err) => {
-      stop(new Error(`Failed to play video: ${err?.message || "playback prevented"}`));
-    });
+    video.play().catch((playErr) => stop(playErr as Error));
 
-    const targetEnd = safeStart + durationSeconds;
-
-    const renderLoop = () => {
-      if (settled) return;
-
-      const current = video.currentTime;
-      const elapsed = Math.max(0, current - safeStart);
-      const progress = Math.min(100, Math.round((elapsed / durationSeconds) * 100));
-      onProgress?.(progress);
-
-      drawCover(ctx, video, width, height);
-      drawBackground(ctx, layout.lines, layout.fontSize, width, height, backgroundColor);
-      drawTextOverlay(ctx, layout, textColor);
-
-      if (current >= targetEnd || video.ended) {
-        stop();
+    timer = window.setInterval(() => {
+      if (signal?.aborted) {
+        stop(new RenderCancelledError());
         return;
       }
 
-      animId = requestAnimationFrame(renderLoop);
-    };
+      drawFrame();
 
-    animId = requestAnimationFrame(renderLoop);
+      const elapsed = Math.max(0, video.currentTime - start);
+      const progress = Math.min(100, Math.round((elapsed / durationSeconds) * 100));
+      opts.onProgress?.(progress);
+
+      if (video.currentTime >= endSeconds || video.ended) {
+        stop();
+      }
+    }, intervalMs);
   });
 }
