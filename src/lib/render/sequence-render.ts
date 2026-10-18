@@ -613,7 +613,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
     } catch {
       /* ignore */
     }
-    if (audioCtx.state !== "running") {
+    if ((audioCtx.state as string) !== "running") {
       console.warn("AudioContext could not start; rendering without sound.");
       audioTracks.length = 0;
     }
