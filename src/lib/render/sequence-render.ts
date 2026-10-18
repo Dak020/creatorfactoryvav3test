@@ -604,27 +604,44 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
     console.warn("Audio pipeline init failed; rendering video-only sequence:", err);
   }
 
-  const combinedStream = new MediaStream([
-    ...canvasStream.getVideoTracks(),
-    ...audioTracks,
-  ]);
+  // Renders started without a tap (e.g. Telegram jobs picked up by an open tab)
+  // leave the AudioContext suspended. A recorder with a silent, clock-less audio
+  // track never emits any data, so fall back to a video-only recording.
+  if (audioCtx && audioTracks.length > 0 && audioCtx.state !== "running") {
+    try {
+      await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 1500))]);
+    } catch {
+      /* ignore */
+    }
+    if (audioCtx.state !== "running") {
+      console.warn("AudioContext could not start; rendering without sound.");
+      audioTracks.length = 0;
+    }
+  }
+  if (audioTracks.length === 0) {
+    prepared.forEach((p) => {
+      p.video.muted = true;
+    });
+  }
+
+  const videoOnlyMime = (m: string) => {
+    if (!m.includes(",")) return m;
+    const v = m.replace(/,\s*(opus|mp4a[^"]*)/, "");
+    return MediaRecorder.isTypeSupported(v) ? v : m.split(";")[0]!;
+  };
 
   let mimeType = pickSupportedMimeType();
-  // Requesting an audio codec with no audio track can yield empty output in some browsers.
-  if (audioTracks.length === 0 && mimeType.includes(",")) {
-    const videoOnly = mimeType.replace(/,\s*(opus|mp4a[^"]*)/, "");
-    if (MediaRecorder.isTypeSupported(videoOnly)) mimeType = videoOnly;
-  }
-  const extension = mimeType.includes("mp4") ? "mp4" : "webm";
-  const recorder = new MediaRecorder(combinedStream, {
-    mimeType,
-    videoBitsPerSecond: 6_000_000,
-  });
-
+  if (audioTracks.length === 0) mimeType = videoOnlyMime(mimeType);
+  let extension = mimeType.includes("mp4") ? "mp4" : "webm";
   const chunks: Blob[] = [];
-  recorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) chunks.push(e.data);
+  const makeRecorder = (tracks: MediaStreamTrack[], mt: string) => {
+    const r = new MediaRecorder(new MediaStream(tracks), { mimeType: mt, videoBitsPerSecond: 6_000_000 });
+    r.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    return r;
   };
+  let recorder = makeRecorder([...canvasStream.getVideoTracks(), ...audioTracks], mimeType);
 
   const intervalMs = 1000 / fps;
 
