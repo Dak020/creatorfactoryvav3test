@@ -609,7 +609,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
   // track never emits any data, so fall back to a video-only recording.
   if (audioCtx && audioTracks.length > 0 && audioCtx.state !== "running") {
     try {
-      await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 1500))]);
+      await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 6000))]);
     } catch {
       /* ignore */
     }
@@ -748,6 +748,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
     if (audioTracks.length > 0) {
       window.setTimeout(async () => {
         if (stopped || chunks.length > 0) return;
+        if (audioCtx && audioCtx.state === "running") return;
         console.warn("Recorder produced no data with audio; restarting video-only.");
         switchingSeg = true;
         try {
@@ -785,7 +786,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
           return;
         }
         switchingSeg = false;
-      }, 2500);
+      }, 6000);
     }
 
     if (soundtrackElement) {

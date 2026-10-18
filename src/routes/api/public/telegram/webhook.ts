@@ -746,7 +746,7 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                 const { data: tracks } = await db()
                   .from("trending_audios")
                   .select("id, title")
-                  .eq("user_id", link.user_id)
+                  .or(`user_id.eq.${link.user_id},user_id.is.null`)
                   .order("created_at", { ascending: false })
                   .limit(3);
                 libraryTracks = (tracks || []).map((t: { id: string; title: string }) => ({
@@ -826,7 +826,7 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                 const { data: tr } = await db()
                   .from("trending_audios")
                   .select("id, title, audio_url")
-                  .eq("user_id", link.user_id)
+                  .or(`user_id.eq.${link.user_id},user_id.is.null`)
                   .order("created_at", { ascending: false })
                   .limit(1)
                   .maybeSingle();
@@ -843,7 +843,7 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                 const { data: tr } = await db()
                   .from("trending_audios")
                   .select("id, title, audio_url")
-                  .eq("user_id", link.user_id)
+                  .or(`user_id.eq.${link.user_id},user_id.is.null`)
                   .ilike("id", `${trackIdPrefix}%`)
                   .limit(1)
                   .maybeSingle();

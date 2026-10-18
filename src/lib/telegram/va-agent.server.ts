@@ -56,7 +56,7 @@ export async function handleTelegramConversationalMessage({
     supabase
       .from("trending_audios")
       .select("id, title, author")
-      .eq("user_id", userId)
+      .or(`user_id.eq.${userId},user_id.is.null`)
       .order("created_at", { ascending: false })
       .limit(5),
     supabase
@@ -339,7 +339,7 @@ Return STRICT JSON ONLY matching one of these action schemas:
         const { data: tr } = await supabase
           .from("trending_audios")
           .select("id, title, audio_url")
-          .eq("user_id", userId)
+          .or(`user_id.eq.${userId},user_id.is.null`)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -356,7 +356,7 @@ Return STRICT JSON ONLY matching one of these action schemas:
         const { data: tr } = await supabase
           .from("trending_audios")
           .select("id, title, audio_url")
-          .eq("user_id", userId)
+          .or(`user_id.eq.${userId},user_id.is.null`)
           .ilike("id", `${trackIdPrefix}%`)
           .limit(1)
           .maybeSingle();
