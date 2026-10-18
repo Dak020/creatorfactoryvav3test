@@ -743,6 +743,51 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       return;
     }
 
+    // If the recorder emits nothing (audio track never starts its clock),
+    // restart from the first clip with a video-only recorder.
+    if (audioTracks.length > 0) {
+      window.setTimeout(async () => {
+        if (stopped || chunks.length > 0) return;
+        console.warn("Recorder produced no data with audio; restarting video-only.");
+        switchingSeg = true;
+        try {
+          recorder.ondataavailable = null;
+          recorder.onerror = null;
+          if (recorder.state !== "inactive") recorder.stop();
+        } catch {
+          /* ignore */
+        }
+        chunks.length = 0;
+        audioTracks.length = 0;
+        prepared.forEach((p) => {
+          try {
+            p.video.pause();
+            p.video.muted = true;
+          } catch {
+            /* ignore */
+          }
+        });
+        mimeType = videoOnlyMime(mimeType);
+        extension = mimeType.includes("mp4") ? "mp4" : "webm";
+        try {
+          recorder = makeRecorder(canvasStream.getVideoTracks(), mimeType);
+          recorder.onerror = () => stop(new Error("MediaRecorder encountered an error."));
+          segIdx = 0;
+          totalPlayedDuration = 0;
+          active = prepared[0]!;
+          await seekVideo(active.video, active.sourceStart, signal).catch(() => {});
+          active.video.playbackRate = active.speed;
+          recorder.start(100);
+          await active.video.play();
+          preseek(1);
+        } catch (e) {
+          stop(e as Error);
+          return;
+        }
+        switchingSeg = false;
+      }, 2500);
+    }
+
     if (soundtrackElement) {
       soundtrackElement.currentTime = 0;
       void soundtrackElement.play().catch(() => {});
