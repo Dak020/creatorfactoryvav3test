@@ -604,27 +604,44 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
     console.warn("Audio pipeline init failed; rendering video-only sequence:", err);
   }
 
-  const combinedStream = new MediaStream([
-    ...canvasStream.getVideoTracks(),
-    ...audioTracks,
-  ]);
+  // Renders started without a tap (e.g. Telegram jobs picked up by an open tab)
+  // leave the AudioContext suspended. A recorder with a silent, clock-less audio
+  // track never emits any data, so fall back to a video-only recording.
+  if (audioCtx && audioTracks.length > 0 && audioCtx.state !== "running") {
+    try {
+      await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 1500))]);
+    } catch {
+      /* ignore */
+    }
+    if ((audioCtx.state as string) !== "running") {
+      console.warn("AudioContext could not start; rendering without sound.");
+      audioTracks.length = 0;
+    }
+  }
+  if (audioTracks.length === 0) {
+    prepared.forEach((p) => {
+      p.video.muted = true;
+    });
+  }
+
+  const videoOnlyMime = (m: string) => {
+    if (!m.includes(",")) return m;
+    const v = m.replace(/,\s*(opus|mp4a[^"]*)/, "");
+    return MediaRecorder.isTypeSupported(v) ? v : m.split(";")[0]!;
+  };
 
   let mimeType = pickSupportedMimeType();
-  // Requesting an audio codec with no audio track can yield empty output in some browsers.
-  if (audioTracks.length === 0 && mimeType.includes(",")) {
-    const videoOnly = mimeType.replace(/,\s*(opus|mp4a[^"]*)/, "");
-    if (MediaRecorder.isTypeSupported(videoOnly)) mimeType = videoOnly;
-  }
-  const extension = mimeType.includes("mp4") ? "mp4" : "webm";
-  const recorder = new MediaRecorder(combinedStream, {
-    mimeType,
-    videoBitsPerSecond: 6_000_000,
-  });
-
+  if (audioTracks.length === 0) mimeType = videoOnlyMime(mimeType);
+  let extension = mimeType.includes("mp4") ? "mp4" : "webm";
   const chunks: Blob[] = [];
-  recorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) chunks.push(e.data);
+  const makeRecorder = (tracks: MediaStreamTrack[], mt: string) => {
+    const r = new MediaRecorder(new MediaStream(tracks), { mimeType: mt, videoBitsPerSecond: 6_000_000 });
+    r.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    return r;
   };
+  let recorder = makeRecorder([...canvasStream.getVideoTracks(), ...audioTracks], mimeType);
 
   const intervalMs = 1000 / fps;
 
@@ -726,6 +743,51 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       return;
     }
 
+    // If the recorder emits nothing (audio track never starts its clock),
+    // restart from the first clip with a video-only recorder.
+    if (audioTracks.length > 0) {
+      window.setTimeout(async () => {
+        if (stopped || chunks.length > 0) return;
+        console.warn("Recorder produced no data with audio; restarting video-only.");
+        switchingSeg = true;
+        try {
+          recorder.ondataavailable = null;
+          recorder.onerror = null;
+          if (recorder.state !== "inactive") recorder.stop();
+        } catch {
+          /* ignore */
+        }
+        chunks.length = 0;
+        audioTracks.length = 0;
+        prepared.forEach((p) => {
+          try {
+            p.video.pause();
+            p.video.muted = true;
+          } catch {
+            /* ignore */
+          }
+        });
+        mimeType = videoOnlyMime(mimeType);
+        extension = mimeType.includes("mp4") ? "mp4" : "webm";
+        try {
+          recorder = makeRecorder(canvasStream.getVideoTracks(), mimeType);
+          recorder.onerror = () => stop(new Error("MediaRecorder encountered an error."));
+          segIdx = 0;
+          totalPlayedDuration = 0;
+          active = prepared[0]!;
+          await seekVideo(active.video, active.sourceStart, signal).catch(() => {});
+          active.video.playbackRate = active.speed;
+          recorder.start(100);
+          await active.video.play();
+          preseek(1);
+        } catch (e) {
+          stop(e as Error);
+          return;
+        }
+        switchingSeg = false;
+      }, 2500);
+    }
+
     if (soundtrackElement) {
       soundtrackElement.currentTime = 0;
       void soundtrackElement.play().catch(() => {});
@@ -734,7 +796,13 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
     let active = prepared[0]!;
     active.video.currentTime = active.sourceStart;
     active.video.playbackRate = active.speed;
-    active.video.play().catch((e) => stop(e as Error));
+    active.video.play().catch(() => {
+      // Autoplay with sound blocked (no tap): continue muted instead of failing.
+      prepared.forEach((p) => {
+        p.video.muted = true;
+      });
+      active.video.play().catch((e) => stop(e as Error));
+    });
 
     const preseek = (i: number) => {
       const nxt = prepared[i];
@@ -804,9 +872,14 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
         next.video.playbackRate = next.speed;
         try {
           await next.video.play();
-        } catch (e) {
-          stop(e as Error);
-          return;
+        } catch {
+          try {
+            next.video.muted = true;
+            await next.video.play();
+          } catch (e) {
+            stop(e as Error);
+            return;
+          }
         }
 
         preseek(segIdx + 1);
