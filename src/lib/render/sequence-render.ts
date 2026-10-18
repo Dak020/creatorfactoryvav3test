@@ -796,7 +796,13 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
     let active = prepared[0]!;
     active.video.currentTime = active.sourceStart;
     active.video.playbackRate = active.speed;
-    active.video.play().catch((e) => stop(e as Error));
+    active.video.play().catch(() => {
+      // Autoplay with sound blocked (no tap): continue muted instead of failing.
+      prepared.forEach((p) => {
+        p.video.muted = true;
+      });
+      active.video.play().catch((e) => stop(e as Error));
+    });
 
     const preseek = (i: number) => {
       const nxt = prepared[i];
@@ -866,9 +872,14 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
         next.video.playbackRate = next.speed;
         try {
           await next.video.play();
-        } catch (e) {
-          stop(e as Error);
-          return;
+        } catch {
+          try {
+            next.video.muted = true;
+            await next.video.play();
+          } catch (e) {
+            stop(e as Error);
+            return;
+          }
         }
 
         preseek(segIdx + 1);
