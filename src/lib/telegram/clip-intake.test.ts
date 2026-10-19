@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HOOK_PLACEMENTS, MEDIA_CATEGORIES } from "@/lib/constants";
 import {
   callbackFitsTelegram,
+  MAX_TELEGRAM_VIDEO_BYTES,
   clipProjectCallback,
   clipTagCallback,
   compactTelegramId,
@@ -40,6 +41,10 @@ describe("Telegram clip intake choices", () => {
       clipTagCallback("cplc", assetId, "bottom"),
     ];
     expect(callbacks.every(callbackFitsTelegram)).toBe(true);
+  });
+
+  it("caps Telegram video uploads at 20 MiB", () => {
+    expect(MAX_TELEGRAM_VIDEO_BYTES).toBe(20 * 1024 * 1024);
   });
 
   it("round-trips compact UUIDs while preserving legacy full UUID callbacks", () => {

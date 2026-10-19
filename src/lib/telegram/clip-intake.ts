@@ -1,6 +1,7 @@
 import { HOOK_PLACEMENTS, MEDIA_CATEGORIES } from "@/lib/constants";
 
 export const TELEGRAM_DNA_ROLES = ["start", "middle", "end", "none"] as const;
+export const MAX_TELEGRAM_VIDEO_BYTES = 20 * 1024 * 1024;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -27,6 +28,18 @@ export function clipProjectCallback(assetId: string, projectId: string): string 
 
 export function clipTagCallback(step: "cdna" | "ccat" | "cplc", assetId: string, value: string): string {
   return `${step}:${compactTelegramId(assetId)}:${value}`;
+}
+
+export function buildUnassignedClipKeyboard(
+  projectId: string,
+  clips: Array<{ id: string; filename: string }>,
+) {
+  const buttons = clips.slice(0, 6).map((clip) => ({
+    text: `📎 ${clip.filename.slice(0, 30)}`,
+    callback_data: clipProjectCallback(clip.id, projectId),
+  }));
+  if (buttons.length === 0) return undefined;
+  return { inline_keyboard: buttons.map((button) => [button]) };
 }
 
 export function isDnaRole(value: string): boolean {
