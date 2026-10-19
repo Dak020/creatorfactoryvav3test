@@ -1,5 +1,5 @@
-- [ ] Telegram VA: create projects, receive project clips, and guide DNA/category/placement tagging.
-- [ ] Validate Telegram upload flow and existing render commands end-to-end.
+- [x] Telegram VA: create projects, receive project clips, and guide DNA/category/placement tagging.
+- [x] Validate Telegram upload flow and existing render commands end-to-end.
 - [ ] Resolve remaining render reliability, preview framing, and duplicate-job issues.
 - [ ] Add Telegram-to-TikTok scheduling/publishing when credentials are available.
 - [ ] Expand Telegram VA coverage across app workflows after core clip intake is stable.

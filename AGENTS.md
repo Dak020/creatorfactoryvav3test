@@ -10,3 +10,5 @@
 <!-- LOVABLE:END -->
 
 Telegram webhook registration must derive the stable project host from the active preview or runtime project ID, so remixes do not keep calling the source project.
+
+Keep Telegram clip-intake validation and callback encoding in a browser-safe shared utility so webhook behavior can be tested independently of server-only integrations.
