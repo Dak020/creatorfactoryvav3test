@@ -3,6 +3,17 @@ import { createClient } from "@supabase/supabase-js";
 import { timingSafeEqual, randomUUID } from "crypto";
 import { tg, sendText, answerCallback, botToken, botKey, webhookSecret, BOT_USERNAME } from "@/lib/telegram/bot.server";
 import { handleTelegramConversationalMessage } from "@/lib/telegram/va-agent.server";
+import { HOOK_PLACEMENTS, MEDIA_CATEGORIES } from "@/lib/constants";
+import {
+  clipProjectCallback,
+  clipTagCallback,
+  expandTelegramId,
+  isDnaRole,
+  isHookPlacement,
+  isMediaCategory,
+  isSupportedTelegramVideo,
+  MAX_TELEGRAM_VIDEO_BYTES,
+} from "@/lib/telegram/clip-intake";
 
 function esc(str: string | null | undefined): string {
   if (!str) return "";
@@ -217,16 +228,18 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
             const videoPayload =
               msg.video ||
               (msg.document &&
-              (msg.document.mime_type?.startsWith("video/") ||
-                msg.document.file_name?.match(/\.(mp4|mov|webm)$/i))
+              isSupportedTelegramVideo(msg.document.file_name || "", msg.document.mime_type || "")
                 ? msg.document
                 : null);
 
+            if (msg.document && !videoPayload) {
+              await sendText(chatId, "📎 Please send an MP4 or MOV video clip. Other document types aren't supported.");
+              return Response.json({ ok: true });
+            }
+
             if (videoPayload) {
               const fileSize = videoPayload.file_size || 0;
-              const maxSizeBytes = 20 * 1024 * 1024; // Telegram Bot API file download cap = 20MB
-
-              if (fileSize > maxSizeBytes) {
+              if (fileSize > MAX_TELEGRAM_VIDEO_BYTES) {
                 await sendText(
                   chatId,
                   `⚠️ <b>File too large:</b> Telegram Bot API limits direct uploads to 20MB. Please compress your clip or upload via the web app Media library.`,
@@ -236,6 +249,9 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
 
               await sendText(chatId, `⏳ <b>Receiving video clip...</b> Uploading to your Creative Factory storage.`);
 
+              let storagePath: string | null = null;
+              let storageUploaded = false;
+              let assetCreated = false;
               try {
                 // 1. Get File Path from Telegram
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -251,15 +267,18 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                   throw new Error(`Failed to download clip: HTTP ${fileRes.status}`);
                 }
                 const arrayBuf = await fileRes.arrayBuffer();
+                if (arrayBuf.byteLength === 0 || arrayBuf.byteLength > MAX_TELEGRAM_VIDEO_BYTES) {
+                  throw new Error("The downloaded clip is empty or exceeds Telegram's 20 MB upload limit.");
+                }
                 const buffer = Buffer.from(arrayBuf);
 
                 // 3. Upload to Supabase Storage Bucket ('media')
                 const assetId = randomUUID();
                 const origName =
                   msg.document?.file_name ||
-                  (fileInfo.file_path.endsWith(".mov") ? `clip_${Date.now()}.mov` : `clip_${Date.now()}.mp4`);
-                const ext = origName.split(".").pop() || "mp4";
-                const storagePath = `${userId}/${assetId}.${ext}`;
+                  (fileInfo.file_path.toLowerCase().endsWith(".mov") ? `clip_${Date.now()}.mov` : `clip_${Date.now()}.mp4`);
+                const extension = origName.match(/\.(mp4|m4v|mov|qt)$/i)?.[1]?.toLowerCase() || "mp4";
+                storagePath = `${userId}/${assetId}.${extension}`;
 
                 const { error: uploadErr } = await db().storage
                   .from("media")
@@ -271,6 +290,7 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                 if (uploadErr) {
                   throw new Error(`Storage upload failed: ${uploadErr.message}`);
                 }
+                storageUploaded = true;
 
                 // 4. Create base media asset record
                 const duration = Number(videoPayload.duration) || 0;
@@ -298,8 +318,11 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                   .single();
 
                 if (assetErr || !newAsset) {
+                  await db().storage.from("media").remove([storagePath]);
+                  storageUploaded = false;
                   throw new Error(`Database record creation failed: ${assetErr?.message}`);
                 }
+                assetCreated = true;
 
                 // 5. Select Project to assign
                 const { data: userProjects } = await db()
@@ -312,7 +335,8 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                 if (!userProjects || userProjects.length === 0) {
                   await sendText(
                     chatId,
-                    `✅ <b>Clip Uploaded!</b>\nSaved to your unassigned Media Library. Create a project with /newproject to use it in renders.`,
+                    `🎬 <b>Clip uploaded.</b> Create a project with /newproject, or keep this clip unassigned while we set its tags.`,
+                    buildClipDnaKeyboard(assetId),
                   );
                   return Response.json({ ok: true });
                 }
@@ -320,28 +344,17 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                 if (userProjects.length === 1) {
                   // Auto-assign to the only project and proceed directly to DNA Role wizard
                   const singleProj = userProjects[0];
-                  await db()
+                  const { error: assignError } = await db()
                     .from("media_assets")
                     .update({ project_id: singleProj.id })
-                    .eq("id", assetId);
-
-                  const dnaKeyboard = {
-                    inline_keyboard: [
-                      [
-                        { text: "🎯 Start (Hook opener)", callback_data: `cdna:${assetId}:start` },
-                        { text: "📦 Middle (Body demo)", callback_data: `cdna:${assetId}:middle` },
-                      ],
-                      [
-                        { text: "🏁 End (CTA outro)", callback_data: `cdna:${assetId}:end` },
-                        { text: "⏭ None (General B-roll)", callback_data: `cdna:${assetId}:none` },
-                      ],
-                    ],
-                  };
+                    .eq("id", assetId)
+                    .eq("user_id", userId);
+                  if (assignError) throw new Error(`Project assignment failed: ${assignError.message}`);
 
                   await sendText(
                     chatId,
-                    `🎬 <b>Clip Saved to "${esc(singleProj.name)}"!</b>\n\nWhat role should this clip play in Clip DNA?`,
-                    dnaKeyboard,
+                    `🎬 <b>Clip saved to "${esc(singleProj.name)}".</b> What role should it play in Clip DNA?`,
+                    buildClipDnaKeyboard(assetId),
                   );
                   return Response.json({ ok: true });
                 }
@@ -350,9 +363,9 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                 const projKeyboard = {
                   inline_keyboard: [
                     ...userProjects.map((p: { id: string; name: string }) => [
-                      { text: `📁 ${p.name}`, callback_data: `cproj:${assetId}:${p.id}` },
+                      { text: `📁 ${p.name.slice(0, 45)}`, callback_data: clipProjectCallback(assetId, p.id) },
                     ]),
-                    [{ text: "📁 Keep Unassigned", callback_data: `cproj:${assetId}:skip` }],
+                    [{ text: "📁 Keep Unassigned", callback_data: clipProjectCallback(assetId, "skip") }],
                   ],
                 };
 
@@ -364,6 +377,10 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                 return Response.json({ ok: true });
               } catch (upErr: any) {
                 console.error("Video intake error:", upErr);
+                if (storageUploaded && !assetCreated && storagePath) {
+                  const { error: cleanupError } = await db().storage.from("media").remove([storagePath]);
+                  if (cleanupError) console.error("Telegram clip cleanup failed:", cleanupError.message);
+                }
                 await sendText(
                   chatId,
                   `❌ <b>Upload failed:</b> ${esc(upErr?.message || "Could not process video")}`,
@@ -547,87 +564,163 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
 
             // Clip Tagging Step 1: Assign Project
             if (data.startsWith("cproj:")) {
-              const [, assetId, targetProjId] = data.split(":");
-              await answerCallback(callbackId);
-
-              if (targetProjId && targetProjId !== "skip") {
-                await db()
-                  .from("media_assets")
-                  .update({ project_id: targetProjId })
-                  .eq("id", assetId);
+              const [, encodedAssetId, encodedProjectId] = data.split(":");
+              const assetId = expandTelegramId(encodedAssetId || "");
+              const targetProjId = expandTelegramId(encodedProjectId || "");
+              const { data: asset } = await db()
+                .from("media_assets")
+                .select("id")
+                .eq("id", assetId)
+                .eq("user_id", userId)
+                .maybeSingle();
+              if (!asset) {
+                await answerCallback(callbackId, "This clip isn't linked to your account.");
+                return Response.json({ ok: true });
               }
 
-              const dnaKeyboard = {
-                inline_keyboard: [
-                  [
-                    { text: "🎯 Start (Hook opener)", callback_data: `cdna:${assetId}:start` },
-                    { text: "📦 Middle (Body demo)", callback_data: `cdna:${assetId}:middle` },
-                  ],
-                  [
-                    { text: "🏁 End (CTA outro)", callback_data: `cdna:${assetId}:end` },
-                    { text: "⏭ None (General B-roll)", callback_data: `cdna:${assetId}:none` },
-                  ],
-                ],
-              };
+              if (targetProjId && targetProjId !== "skip") {
+                const { data: project } = await db()
+                  .from("projects")
+                  .select("id")
+                  .eq("id", targetProjId)
+                  .eq("user_id", userId)
+                  .maybeSingle();
+                if (!project) {
+                  await answerCallback(callbackId, "Choose one of your own projects.");
+                  return Response.json({ ok: true });
+                }
+                const { error } = await db()
+                  .from("media_assets")
+                  .update({ project_id: targetProjId })
+                  .eq("id", assetId)
+                  .eq("user_id", userId);
+                if (error) throw new Error(`Project assignment failed: ${error.message}`);
+              }
+              await answerCallback(callbackId);
 
               await editMessageText(
                 chatId,
                 messageId,
-                `🧬 <b>Step 2: Assign Clip DNA Role</b>\n\nWhere should this footage appear during sequenced multi-clip edits?`,
-                dnaKeyboard,
+                `🧬 <b>Clip DNA role</b>\n\nWhere should this footage appear during a sequenced edit?`,
+                buildClipDnaKeyboard(assetId),
               );
               return Response.json({ ok: true });
             }
 
             // Clip Tagging Step 2: Assign DNA Role
             if (data.startsWith("cdna:")) {
-              const [, assetId, role] = data.split(":");
+              const [, encodedAssetId, role] = data.split(":");
+              const assetId = expandTelegramId(encodedAssetId || "");
+              if (!isDnaRole(role || "")) {
+                await answerCallback(callbackId, "That DNA choice isn't valid.");
+                return Response.json({ ok: true });
+              }
+              const { data: asset } = await db()
+                .from("media_assets")
+                .select("id")
+                .eq("id", assetId)
+                .eq("user_id", userId)
+                .maybeSingle();
+              if (!asset) {
+                await answerCallback(callbackId, "This clip isn't linked to your account.");
+                return Response.json({ ok: true });
+              }
               await answerCallback(callbackId);
 
               const roleValue = role === "none" ? null : role;
-              await db()
+              const { error } = await db()
                 .from("media_assets")
                 .update({ dna_role: roleValue })
-                .eq("id", assetId);
+                .eq("id", assetId)
+                .eq("user_id", userId);
+              if (error) throw new Error(`DNA role update failed: ${error.message}`);
 
               const placementKeyboard = {
-                inline_keyboard: [
-                  [
-                    { text: "🔝 Top (Safe area)", callback_data: `cplc:${assetId}:top` },
-                    { text: "🎯 Middle (Center)", callback_data: `cplc:${assetId}:middle` },
-                  ],
-                  [
-                    { text: "⬇️ Bottom (Above bar)", callback_data: `cplc:${assetId}:bottom` },
-                    { text: "⏭ Skip", callback_data: `cplc:${assetId}:skip` },
-                  ],
-                ],
+                inline_keyboard: MEDIA_CATEGORIES.map((category) => [
+                  { text: category, callback_data: clipTagCallback("ccat", assetId, category) },
+                ]),
               };
 
               await editMessageText(
                 chatId,
                 messageId,
-                `📌 <b>Step 3: Hook Text Placement</b>\n\nIf text overlay is rendered on this clip, where should it sit?`,
+                `🏷 <b>Clip category</b>\n\nChoose the same category used in the Media Library.`,
                 placementKeyboard,
               );
               return Response.json({ ok: true });
             }
 
+            if (data.startsWith("ccat:")) {
+              const [, encodedAssetId, category] = data.split(":");
+              const assetId = expandTelegramId(encodedAssetId || "");
+              if (!isMediaCategory(category || "")) {
+                await answerCallback(callbackId, "That category isn't valid.");
+                return Response.json({ ok: true });
+              }
+              const { data: asset } = await db()
+                .from("media_assets")
+                .select("id")
+                .eq("id", assetId)
+                .eq("user_id", userId)
+                .maybeSingle();
+              if (!asset) {
+                await answerCallback(callbackId, "This clip isn't linked to your account.");
+                return Response.json({ ok: true });
+              }
+              await answerCallback(callbackId);
+              const { error } = await db()
+                .from("media_assets")
+                .update({ category })
+                .eq("id", assetId)
+                .eq("user_id", userId);
+              if (error) throw new Error(`Category update failed: ${error.message}`);
+
+              const placementKeyboard = {
+                inline_keyboard: [
+                  ...HOOK_PLACEMENTS.map((placement) => [
+                    { text: `${placement.label} — ${placement.hint}`, callback_data: clipTagCallback("cplc", assetId, placement.value) },
+                  ]),
+                  [{ text: "Skip", callback_data: clipTagCallback("cplc", assetId, "skip") }],
+                ],
+              };
+              await editMessageText(chatId, messageId, `📌 <b>Hook text placement</b>\n\nChoose where on this clip hook text should sit.`, placementKeyboard);
+              return Response.json({ ok: true });
+            }
+
             // Clip Tagging Step 3: Assign Hook Placement & Finish
             if (data.startsWith("cplc:")) {
-              const [, assetId, placement] = data.split(":");
+              const [, encodedAssetId, placement] = data.split(":");
+              const assetId = expandTelegramId(encodedAssetId || "");
+              if (placement !== "skip" && !isHookPlacement(placement || "")) {
+                await answerCallback(callbackId, "That placement isn't valid.");
+                return Response.json({ ok: true });
+              }
+              const { data: ownedAsset } = await db()
+                .from("media_assets")
+                .select("id")
+                .eq("id", assetId)
+                .eq("user_id", userId)
+                .maybeSingle();
+              if (!ownedAsset) {
+                await answerCallback(callbackId, "This clip isn't linked to your account.");
+                return Response.json({ ok: true });
+              }
               await answerCallback(callbackId, "Clip saved!");
 
               if (placement !== "skip") {
-                await db()
+                const { error } = await db()
                   .from("media_assets")
                   .update({ hook_placement: placement })
-                  .eq("id", assetId);
+                  .eq("id", assetId)
+                  .eq("user_id", userId);
+                if (error) throw new Error(`Placement update failed: ${error.message}`);
               }
 
               const { data: asset } = await db()
                 .from("media_assets")
-                .select("project_id, filename, dna_role, hook_placement")
+                .select("project_id, filename, dna_role, category, hook_placement")
                 .eq("id", assetId)
+                .eq("user_id", userId)
                 .maybeSingle();
 
               let projName = "Unassigned";
@@ -654,6 +747,7 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                   `• <b>File:</b> ${esc(asset?.filename)}\n` +
                   `• <b>Project:</b> ${esc(projName)}\n` +
                   `• <b>DNA Role:</b> ${esc(asset?.dna_role ? asset.dna_role.toUpperCase() : "None")}\n` +
+                  `• <b>Category:</b> ${esc(asset?.category || "Other")}\n` +
                   `• <b>Placement:</b> ${esc(asset?.hook_placement || "top")}\n\n` +
                   `📊 <b>Project Status:</b> ${clipCount} total clip(s) · ${dnaTaggedCount} DNA-tagged\n\n` +
                   `<i>Ready to render? Type /render to create a batch!</i>`,
