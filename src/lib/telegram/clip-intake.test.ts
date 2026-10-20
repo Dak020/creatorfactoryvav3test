@@ -10,6 +10,7 @@ import {
   isDnaRole,
   isHookPlacement,
   isMediaCategory,
+  isSupportedTelegramVideo,
 } from "./clip-intake";
 
 const assetId = "9afa8047-20f6-4ba1-a943-24540d899d3b";
@@ -45,6 +46,12 @@ describe("Telegram clip intake choices", () => {
 
   it("caps Telegram video uploads at 20 MiB", () => {
     expect(MAX_TELEGRAM_VIDEO_BYTES).toBe(20 * 1024 * 1024);
+  });
+
+  it("accepts the same MP4/MOV formats as the web media library", () => {
+    expect(isSupportedTelegramVideo("clip.mp4", "application/octet-stream")).toBe(true);
+    expect(isSupportedTelegramVideo("clip.mov")).toBe(true);
+    expect(isSupportedTelegramVideo("clip.webm", "video/webm")).toBe(false);
   });
 
   it("round-trips compact UUIDs while preserving legacy full UUID callbacks", () => {
