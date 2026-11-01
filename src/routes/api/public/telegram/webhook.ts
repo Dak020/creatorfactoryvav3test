@@ -5,6 +5,7 @@ import { tg, sendText, answerCallback, botToken, botKey, webhookSecret, BOT_USER
 import { handleTelegramConversationalMessage } from "@/lib/telegram/va-agent.server";
 import { HOOK_PLACEMENTS, MEDIA_CATEGORIES } from "@/lib/constants";
 import {
+  buildClipDnaKeyboard,
   clipProjectCallback,
   clipTagCallback,
   expandTelegramId,
@@ -548,6 +549,21 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
 
             if (!chatId || !messageId) {
               await answerCallback(callbackId);
+              return Response.json({ ok: true });
+            }
+
+            const { data: cbLink } = await db()
+              .from("telegram_links")
+              .select("user_id")
+              .eq("chat_id", chatId)
+              .maybeSingle();
+            const userId = cbLink?.user_id as string | undefined;
+            if (!userId) {
+              await answerCallback(callbackId, "Account not linked");
+              await sendText(
+                chatId,
+                "⚠️ This chat isn't connected to an account. Open Settings in the app and tap Connect Telegram.",
+              );
               return Response.json({ ok: true });
             }
 
