@@ -80,3 +80,17 @@ export function isSupportedTelegramVideo(filename: string, mimeType = ""): boole
 export function callbackFitsTelegram(value: string): boolean {
   return new TextEncoder().encode(value).byteLength <= 64;
 }
+export function buildClipDnaKeyboard(assetId: string) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "🎬 Start / Hook", callback_data: clipTagCallback("cdna", assetId, "start") },
+        { text: "🎞 Middle / Body", callback_data: clipTagCallback("cdna", assetId, "middle") },
+      ],
+      [
+        { text: "🏁 End / Outro", callback_data: clipTagCallback("cdna", assetId, "end") },
+        { text: "⏭ None / General", callback_data: clipTagCallback("cdna", assetId, "none") },
+      ],
+    ],
+  };
+}
