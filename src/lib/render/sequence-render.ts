@@ -569,24 +569,14 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
   const fps = 30;
   const canvasStream = canvas.captureStream(fps);
 
-  let audioCtx: AudioContext | null = null;
   let soundtrackElement: HTMLAudioElement | null = null;
   const audioTracks: MediaStreamTrack[] = [];
 
+  // The shared AudioContext is reused across renders and never closed here —
+  // closing it after every render was why later renders lost their sound.
   const cleanupAudio = () => {
     try {
       soundtrackElement?.pause();
-      if (soundtrackElement) {
-        soundtrackElement.removeAttribute("src");
-        soundtrackElement.load();
-      }
-    } catch {
-      /* ignore */
-    }
-    try {
-      if (audioCtx && audioCtx.state !== "closed") {
-        void audioCtx.close();
-      }
     } catch {
       /* ignore */
     }
