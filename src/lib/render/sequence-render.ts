@@ -71,6 +71,82 @@ export function releaseVideoDecoder(video: HTMLVideoElement) {
   }
 }
 
+// ---- Shared audio pipeline state -------------------------------------------
+// One AudioContext per tab, kept alive across renders. Recreating the context
+// per render made every render after the first lose its sound: a fresh context
+// without a fresh user gesture stays suspended and the export silently became
+// video-only. The soundtrack element is also preloaded once per URL and reused.
+let sharedAudioCtx: AudioContext | null = null;
+const soundtrackPool = new Map<string, HTMLAudioElement>();
+const mediaSourceCache = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>();
+
+export class SoundtrackLoadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SoundtrackLoadError";
+  }
+}
+
+function getSharedAudioContext(): AudioContext | null {
+  const AudioContextClass =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!sharedAudioCtx || sharedAudioCtx.state === "closed") {
+    sharedAudioCtx = new AudioContextClass();
+  }
+  return sharedAudioCtx;
+}
+
+/** Loads a soundtrack once per URL; later renders reuse the cached element. */
+async function preloadSoundtrack(url: string): Promise<HTMLAudioElement> {
+  const cached = soundtrackPool.get(url);
+  if (cached) return cached;
+  const audio = new Audio();
+  audio.crossOrigin = "anonymous";
+  audio.preload = "auto";
+  audio.src = url;
+  let timeout: number | undefined;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      if (timeout !== undefined) clearTimeout(timeout);
+      audio.removeEventListener("canplaythrough", ok);
+      audio.removeEventListener("error", fail);
+    };
+    const ok = () => {
+      cleanup();
+      resolve();
+    };
+    const fail = () => {
+      cleanup();
+      soundtrackPool.delete(url);
+      reject(
+        new SoundtrackLoadError(
+          "The selected sound could not be loaded, so the render was stopped instead of exporting a silent video.",
+        ),
+      );
+    };
+    timeout = window.setTimeout(() => {
+      cleanup();
+      soundtrackPool.delete(url);
+      reject(
+        new SoundtrackLoadError(
+          "Timed out loading the selected sound, so the render was stopped instead of exporting a silent video.",
+        ),
+      );
+    }, 20_000);
+    audio.addEventListener("canplaythrough", ok, { once: true });
+    audio.addEventListener("error", fail, { once: true });
+    try {
+      audio.load();
+    } catch {
+      /* ignore */
+    }
+  });
+  soundtrackPool.set(url, audio);
+  return audio;
+}
+
 function fontFor(size: number) {
   return `900 ${size}px 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
 }
