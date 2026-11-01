@@ -619,46 +619,24 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
 
       if (soundtrackUrl) {
         try {
-          const audio = new Audio();
-          audio.crossOrigin = "anonymous";
-          audio.preload = "auto";
-          audio.src = soundtrackUrl;
+          const audio = await preloadSoundtrack(soundtrackUrl);
           audio.volume = Math.max(0, Math.min(1, opts.soundtrackVolume ?? 1));
           soundtrackElement = audio;
 
-          await new Promise<void>((resolve, reject) => {
-            const ok = () => {
-              cleanup();
-              resolve();
-            };
-            const fail = () => {
-              cleanup();
-              reject(new Error("Failed to load soundtrack."));
-            };
-            const timeout = setTimeout(() => {
-              cleanup();
-              reject(new Error("Timed out loading soundtrack."));
-            }, 20_000);
-            const cleanup = () => {
-              clearTimeout(timeout);
-              audio.removeEventListener("canplaythrough", ok);
-              audio.removeEventListener("error", fail);
-            };
-            audio.addEventListener("canplaythrough", ok, { once: true });
-            audio.addEventListener("error", fail, { once: true });
-            try {
-              audio.load();
-            } catch {
-              /* ignore */
-            }
-          });
-
           audio.currentTime = 0;
-          const trackSource = audioCtx.createMediaElementSource(audio);
+          let trackSource = mediaSourceCache.get(audio);
+          if (!trackSource || trackSource.context !== audioCtx || trackSource.context.state === "closed") {
+            trackSource = audioCtx.createMediaElementSource(audio);
+            mediaSourceCache.set(audio, trackSource);
+          }
+          trackSource.disconnect();
           trackSource.connect(dest);
           hasSource = true;
         } catch (soundtrackErr) {
-          console.warn("Could not bind soundtrack track; proceeding without it:", soundtrackErr);
+          if (soundtrackErr instanceof SoundtrackLoadError) throw soundtrackErr;
+          throw new SoundtrackLoadError(
+            `Could not mix the selected sound into the render: ${(soundtrackErr as Error).message}`,
+          );
         }
       }
 
