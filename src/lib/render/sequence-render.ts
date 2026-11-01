@@ -582,9 +582,11 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
     }
   };
 
+  let audioCtx: AudioContext | null = null;
   try {
-    const audioCtx = getSharedAudioContext();
-    if (audioCtx && (withAudio || soundtrackUrl)) {
+    if (withAudio || soundtrackUrl) {
+      audioCtx = getSharedAudioContext();
+      if (!audioCtx) throw new Error("Web Audio is unavailable in this browser.");
       const dest = audioCtx.createMediaStreamDestination();
 
       // Silent keepalive: feeds continuous inaudible samples so Chromium's
