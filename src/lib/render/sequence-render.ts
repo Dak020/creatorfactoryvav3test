@@ -583,12 +583,8 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
   };
 
   try {
-    const AudioContextClass =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-
-       if (AudioContextClass && (withAudio || soundtrackUrl)) {
-      audioCtx = new AudioContextClass();
+    const audioCtx = getSharedAudioContext();
+    if (audioCtx && (withAudio || soundtrackUrl)) {
       const dest = audioCtx.createMediaStreamDestination();
 
       // Silent keepalive: feeds continuous inaudible samples so Chromium's
