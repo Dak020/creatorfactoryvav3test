@@ -30,6 +30,8 @@ export interface SequenceRenderResult {
   mimeType: string;
   thumbnail?: Blob | undefined;
   actualDuration: number;
+  /** false when the export has no audio track even though sound was requested. */
+  audioIncluded: boolean;
 }
 
 export class RenderCancelledError extends Error {
