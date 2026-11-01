@@ -30,6 +30,8 @@ export interface SequenceRenderResult {
   mimeType: string;
   thumbnail?: Blob | undefined;
   actualDuration: number;
+  /** false when the export has no audio track even though sound was requested. */
+  audioIncluded: boolean;
 }
 
 export class RenderCancelledError extends Error {
@@ -67,6 +69,82 @@ export function releaseVideoDecoder(video: HTMLVideoElement) {
   } catch {
     /* ignore */
   }
+}
+
+// ---- Shared audio pipeline state -------------------------------------------
+// One AudioContext per tab, kept alive across renders. Recreating the context
+// per render made every render after the first lose its sound: a fresh context
+// without a fresh user gesture stays suspended and the export silently became
+// video-only. The soundtrack element is also preloaded once per URL and reused.
+let sharedAudioCtx: AudioContext | null = null;
+const soundtrackPool = new Map<string, HTMLAudioElement>();
+const mediaSourceCache = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>();
+
+export class SoundtrackLoadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SoundtrackLoadError";
+  }
+}
+
+function getSharedAudioContext(): AudioContext | null {
+  const AudioContextClass =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!sharedAudioCtx || sharedAudioCtx.state === "closed") {
+    sharedAudioCtx = new AudioContextClass();
+  }
+  return sharedAudioCtx;
+}
+
+/** Loads a soundtrack once per URL; later renders reuse the cached element. */
+async function preloadSoundtrack(url: string): Promise<HTMLAudioElement> {
+  const cached = soundtrackPool.get(url);
+  if (cached) return cached;
+  const audio = new Audio();
+  audio.crossOrigin = "anonymous";
+  audio.preload = "auto";
+  audio.src = url;
+  let timeout: number | undefined;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      if (timeout !== undefined) clearTimeout(timeout);
+      audio.removeEventListener("canplaythrough", ok);
+      audio.removeEventListener("error", fail);
+    };
+    const ok = () => {
+      cleanup();
+      resolve();
+    };
+    const fail = () => {
+      cleanup();
+      soundtrackPool.delete(url);
+      reject(
+        new SoundtrackLoadError(
+          "The selected sound could not be loaded, so the render was stopped instead of exporting a silent video.",
+        ),
+      );
+    };
+    timeout = window.setTimeout(() => {
+      cleanup();
+      soundtrackPool.delete(url);
+      reject(
+        new SoundtrackLoadError(
+          "Timed out loading the selected sound, so the render was stopped instead of exporting a silent video.",
+        ),
+      );
+    }, 20_000);
+    audio.addEventListener("canplaythrough", ok, { once: true });
+    audio.addEventListener("error", fail, { once: true });
+    try {
+      audio.load();
+    } catch {
+      /* ignore */
+    }
+  });
+  soundtrackPool.set(url, audio);
+  return audio;
 }
 
 function fontFor(size: number) {
@@ -491,36 +569,24 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
   const fps = 30;
   const canvasStream = canvas.captureStream(fps);
 
-  let audioCtx: AudioContext | null = null;
   let soundtrackElement: HTMLAudioElement | null = null;
   const audioTracks: MediaStreamTrack[] = [];
 
+  // The shared AudioContext is reused across renders and never closed here —
+  // closing it after every render was why later renders lost their sound.
   const cleanupAudio = () => {
     try {
       soundtrackElement?.pause();
-      if (soundtrackElement) {
-        soundtrackElement.removeAttribute("src");
-        soundtrackElement.load();
-      }
-    } catch {
-      /* ignore */
-    }
-    try {
-      if (audioCtx && audioCtx.state !== "closed") {
-        void audioCtx.close();
-      }
     } catch {
       /* ignore */
     }
   };
 
+  let audioCtx: AudioContext | null = null;
   try {
-    const AudioContextClass =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-
-       if (AudioContextClass && (withAudio || soundtrackUrl)) {
-      audioCtx = new AudioContextClass();
+    if (withAudio || soundtrackUrl) {
+      audioCtx = getSharedAudioContext();
+      if (!audioCtx) throw new Error("Web Audio is unavailable in this browser.");
       const dest = audioCtx.createMediaStreamDestination();
 
       // Silent keepalive: feeds continuous inaudible samples so Chromium's
@@ -553,46 +619,24 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
 
       if (soundtrackUrl) {
         try {
-          const audio = new Audio();
-          audio.crossOrigin = "anonymous";
-          audio.preload = "auto";
-          audio.src = soundtrackUrl;
+          const audio = await preloadSoundtrack(soundtrackUrl);
           audio.volume = Math.max(0, Math.min(1, opts.soundtrackVolume ?? 1));
           soundtrackElement = audio;
 
-          await new Promise<void>((resolve, reject) => {
-            const ok = () => {
-              cleanup();
-              resolve();
-            };
-            const fail = () => {
-              cleanup();
-              reject(new Error("Failed to load soundtrack."));
-            };
-            const timeout = setTimeout(() => {
-              cleanup();
-              reject(new Error("Timed out loading soundtrack."));
-            }, 20_000);
-            const cleanup = () => {
-              clearTimeout(timeout);
-              audio.removeEventListener("canplaythrough", ok);
-              audio.removeEventListener("error", fail);
-            };
-            audio.addEventListener("canplaythrough", ok, { once: true });
-            audio.addEventListener("error", fail, { once: true });
-            try {
-              audio.load();
-            } catch {
-              /* ignore */
-            }
-          });
-
           audio.currentTime = 0;
-          const trackSource = audioCtx.createMediaElementSource(audio);
+          let trackSource = mediaSourceCache.get(audio);
+          if (!trackSource || trackSource.context !== audioCtx || trackSource.context.state === "closed") {
+            trackSource = audioCtx.createMediaElementSource(audio);
+            mediaSourceCache.set(audio, trackSource);
+          }
+          trackSource.disconnect();
           trackSource.connect(dest);
           hasSource = true;
         } catch (soundtrackErr) {
-          console.warn("Could not bind soundtrack track; proceeding without it:", soundtrackErr);
+          if (soundtrackErr instanceof SoundtrackLoadError) throw soundtrackErr;
+          throw new SoundtrackLoadError(
+            `Could not mix the selected sound into the render: ${(soundtrackErr as Error).message}`,
+          );
         }
       }
 
