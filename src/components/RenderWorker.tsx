@@ -160,7 +160,13 @@ export function RenderWorker() {
           placement = "bottom";
         }
 
-        let renderResult: { blob: Blob; extension: string; mimeType: string; thumbnail?: Blob | null | undefined };
+        let renderResult: {
+          blob: Blob;
+          extension: string;
+          mimeType: string;
+          thumbnail?: Blob | null | undefined;
+          audioIncluded?: boolean | undefined;
+        };
 
         if (isDna) {
           // --- CLIP DNA MULTI-CLIP RENDERING ---
