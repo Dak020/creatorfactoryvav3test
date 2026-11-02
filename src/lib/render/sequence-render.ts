@@ -645,6 +645,9 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       }
     }
   } catch (err) {
+    // A requested sound that fails to load must fail the render visibly —
+    // silently exporting a silent video is what caused soundless batch items.
+    if (err instanceof SoundtrackLoadError) throw err;
     console.warn("Audio pipeline init failed; rendering video-only sequence:", err);
   }
 
@@ -662,6 +665,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
       audioTracks.length = 0;
     }
   }
+  const audioIncluded = audioTracks.length > 0;
   if (audioTracks.length === 0) {
     prepared.forEach((p) => {
       p.video.muted = true;
@@ -730,7 +734,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
             reject(new Error("Recorder produced no data. Keep this tab open and in front while rendering, then retry."));
             return;
           }
-          resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
+          resolve({ blob, extension, mimeType, thumbnail, audioIncluded, actualDuration: totalPlayedDuration });
         };
         // Let the final ondataavailable chunk land before assembling the blob.
         recorder.onstop = () => window.setTimeout(finish, 50);
@@ -760,7 +764,7 @@ export async function renderSequence(opts: SequenceRenderOptions): Promise<Seque
           reject(err);
         } else {
           const blob = new Blob(chunks, { type: mimeType });
-          resolve({ blob, extension, mimeType, thumbnail, actualDuration: totalPlayedDuration });
+          resolve({ blob, extension, mimeType, thumbnail, audioIncluded, actualDuration: totalPlayedDuration });
         }
       }
     };
