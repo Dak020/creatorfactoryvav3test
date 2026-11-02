@@ -279,6 +279,10 @@ export function RenderWorker() {
           });
         }
 
+        if ((withAudio || soundtrackUrl) && !renderResult.audioIncluded) {
+          toast.warning("Rendered without sound — audio couldn't start. Retry with this tab in front.", { id: toastId });
+        }
+
         const { blob, extension, mimeType, thumbnail } = renderResult;
 
         if (!blob || blob.size === 0) {
