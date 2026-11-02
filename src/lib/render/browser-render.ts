@@ -23,6 +23,8 @@ export interface BrowserRenderResult {
   extension: string;
   mimeType: string;
   thumbnail?: Blob | undefined;
+  /** false when the export has no audio track even though sound was requested. */
+  audioIncluded: boolean;
 }
 
 export class RenderCancelledError extends Error {
@@ -537,7 +539,11 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
           trackSource.connect(dest);
           hasSource = true;
         } catch (soundtrackErr) {
-          console.warn("Could not bind soundtrack track; proceeding without it:", soundtrackErr);
+          // A requested sound that fails to bind must fail the render visibly
+          // instead of silently exporting a silent video.
+          if (soundtrackElement) soundtrackElement.src = "";
+          soundtrackElement = null;
+          throw soundtrackErr;
         }
       }
 
