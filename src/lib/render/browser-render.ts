@@ -550,7 +550,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
           // instead of silently exporting a silent video.
           if (soundtrackElement) soundtrackElement.src = "";
           soundtrackElement = null;
-          throw soundtrackErr;
+          throw new SoundtrackLoadError((soundtrackErr as Error).message);
         }
       }
 
@@ -619,7 +619,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
         cleanupAudio();
         if (err) reject(err);
         else if (chunks.length === 0) reject(new Error("Recorder produced no data"));
-        else resolve({ blob: new Blob(chunks, { type: mimeType }), extension, mimeType, thumbnail });
+        else resolve({ blob: new Blob(chunks, { type: mimeType }), extension, mimeType, thumbnail, audioIncluded });
       };
 
       if (recorder.state !== "inactive") {
