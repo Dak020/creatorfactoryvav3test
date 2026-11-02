@@ -170,7 +170,7 @@ export async function runDnaVariant(input: DnaVariantInput): Promise<BatchItem> 
       outputDuration: s.output_duration,
     }));
 
-    const { blob, extension, mimeType, thumbnail, audioIncluded } = await renderSequence({
+    const { blob, extension, mimeType, thumbnail } = await renderSequence({
       segments,
       width: OUT_W,
       height: OUT_H,
@@ -182,14 +182,6 @@ export async function runDnaVariant(input: DnaVariantInput): Promise<BatchItem> 
       signal: input.signal,
       onProgress: (pct) => patch({ stage: "rendering", progress: Math.max(4, pct * 0.8) }),
     });
-
-    // A batch item must never ship soundless when a sound was requested —
-    // fail visibly so the user can retry with the tab active.
-    if ((withAudio || input.soundtrackUrl) && !audioIncluded) {
-      throw new Error(
-        "Render completed without sound — the audio engine could not start. Keep this tab in front and retry.",
-      );
-    }
 
     patch({ stage: "encoding", progress: 85 });
     if (!blob || blob.size === 0) throw new Error("Renderer produced an empty video file.");

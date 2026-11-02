@@ -160,13 +160,7 @@ export function RenderWorker() {
           placement = "bottom";
         }
 
-        let renderResult: {
-          blob: Blob;
-          extension: string;
-          mimeType: string;
-          thumbnail?: Blob | null | undefined;
-          audioIncluded?: boolean | undefined;
-        };
+        let renderResult: { blob: Blob; extension: string; mimeType: string; thumbnail?: Blob | null | undefined };
 
         if (isDna) {
           // --- CLIP DNA MULTI-CLIP RENDERING ---
@@ -283,10 +277,6 @@ export function RenderWorker() {
               supabase.from("render_jobs").update({ progress: p }).eq("id", job.id).then(() => {});
             },
           });
-        }
-
-        if ((withAudio || soundtrackUrl) && !renderResult.audioIncluded) {
-          toast.warning("Rendered without sound — audio couldn't start. Retry with this tab in front.", { id: toastId });
         }
 
         const { blob, extension, mimeType, thumbnail } = renderResult;
