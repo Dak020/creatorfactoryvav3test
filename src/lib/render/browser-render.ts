@@ -27,6 +27,13 @@ export interface BrowserRenderResult {
   audioIncluded: boolean;
 }
 
+export class SoundtrackLoadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SoundtrackLoadError";
+  }
+}
+
 export class RenderCancelledError extends Error {
   constructor() {
     super("Render was cancelled");
@@ -552,8 +559,25 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
       }
     }
   } catch (err) {
+    if (err instanceof SoundtrackLoadError) throw err;
     console.warn("Audio pipeline init failed; rendering video-only stream:", err);
   }
+
+  // Renders started without a tap (e.g. Telegram jobs picked up by an open tab)
+  // leave the AudioContext suspended; an audio track with no clock never emits
+  // data, so fall back to a video-only recording.
+  if (audioCtx && audioTracks.length > 0 && audioCtx.state !== "running") {
+    try {
+      await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 6000))]);
+    } catch {
+      /* ignore */
+    }
+    if (audioCtx.state !== "running") {
+      console.warn("AudioContext could not start; rendering without sound.");
+      audioTracks.length = 0;
+    }
+  }
+  const audioIncluded = audioTracks.length > 0;
 
   const combinedStream = new MediaStream([
     ...canvasStream.getVideoTracks(),
