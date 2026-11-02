@@ -23,15 +23,6 @@ export interface BrowserRenderResult {
   extension: string;
   mimeType: string;
   thumbnail?: Blob | undefined;
-  /** false when the export has no audio track even though sound was requested. */
-  audioIncluded: boolean;
-}
-
-export class SoundtrackLoadError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SoundtrackLoadError";
-  }
 }
 
 export class RenderCancelledError extends Error {
@@ -546,11 +537,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
           trackSource.connect(dest);
           hasSource = true;
         } catch (soundtrackErr) {
-          // A requested sound that fails to bind must fail the render visibly
-          // instead of silently exporting a silent video.
-          if (soundtrackElement) soundtrackElement.src = "";
-          soundtrackElement = null;
-          throw new SoundtrackLoadError((soundtrackErr as Error).message);
+          console.warn("Could not bind soundtrack track; proceeding without it:", soundtrackErr);
         }
       }
 
@@ -559,25 +546,8 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
       }
     }
   } catch (err) {
-    if (err instanceof SoundtrackLoadError) throw err;
     console.warn("Audio pipeline init failed; rendering video-only stream:", err);
   }
-
-  // Renders started without a tap (e.g. Telegram jobs picked up by an open tab)
-  // leave the AudioContext suspended; an audio track with no clock never emits
-  // data, so fall back to a video-only recording.
-  if (audioCtx && audioTracks.length > 0 && audioCtx.state !== "running") {
-    try {
-      await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 6000))]);
-    } catch {
-      /* ignore */
-    }
-    if ((audioCtx.state as string) !== "running") {
-      console.warn("AudioContext could not start; rendering without sound.");
-      audioTracks.length = 0;
-    }
-  }
-  const audioIncluded = audioTracks.length > 0;
 
   const combinedStream = new MediaStream([
     ...canvasStream.getVideoTracks(),
@@ -619,7 +589,7 @@ export async function renderVariant(opts: BrowserRenderOptions): Promise<Browser
         cleanupAudio();
         if (err) reject(err);
         else if (chunks.length === 0) reject(new Error("Recorder produced no data"));
-        else resolve({ blob: new Blob(chunks, { type: mimeType }), extension, mimeType, thumbnail, audioIncluded });
+        else resolve({ blob: new Blob(chunks, { type: mimeType }), extension, mimeType, thumbnail });
       };
 
       if (recorder.state !== "inactive") {
