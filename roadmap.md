@@ -1,3 +1,5 @@
+- [ ] Fix the blank authenticated pages caused by a server-only import in the client bundle.
+- [ ] Make automatic audio selection USA-only and refresh trending charts automatically so the picker favors current sounds; leave hook creation untouched.
 - [ ] Telegram VA: create projects, receive project clips, and guide DNA/category/placement tagging.
 - [ ] Validate Telegram upload flow and existing render commands end-to-end.
 - [ ] Resolve remaining render reliability, preview framing, and duplicate-job issues.
