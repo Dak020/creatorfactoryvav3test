@@ -202,7 +202,7 @@ export function AudioLibraryPanel() {
   const syncTrending = useServerFn(syncTrendingAudiosFn);
   const importTikTokUrl = useServerFn(importTikTokUrlAudioFn);
 
-  const [tab, setTab] = useState<"global" | "usa" | "mine">("global");
+  const [tab, setTab] = useState<"usa" | "global" | "mine">("usa");
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadMode, setUploadMode] = useState<"file" | "link">("file");
