@@ -242,3 +242,19 @@ export async function publishStatus(accessToken: string, publishId: string) {
     return { status: null, publiclyAvailableIds: [] as string[] };
   }
 }
+
+/**
+ * Builds the absolute redirect_uri TikTok should send the browser back to.
+ * Keeps server-only request inspection inside this server module.
+ */
+export async function tiktokRedirectUri(): Promise<string> {
+  const configured = process.env["TIKTOK_REDIRECT_URI"];
+  if (configured) return configured;
+
+  const { getRequest } = await import("@tanstack/react-start/server");
+  const request = getRequest();
+  const url = new URL(request!.url);
+  const forwarded = request!.headers.get("x-forwarded-host");
+  const origin = forwarded ? `https://${forwarded}` : url.origin;
+  return new URL("/oauth/tiktok/callback", origin).toString();
+}
