@@ -53,7 +53,7 @@ export function AudioStrategySelector({
   const getTrending = useServerFn(getTrendingAudiosFn);
   const getMyLibrary = useServerFn(getMyAudioLibraryFn);
 
-  const [autoRegion, setAutoRegion] = useState<"global" | "usa">("global");
+  const [autoRegion, setAutoRegion] = useState<"global" | "usa">("usa");
   const [libraryAudioId, setLibraryAudioId] = useState<string | null>(initialAudioId ?? null);
   const [isShuffling, setIsShuffling] = useState(false);
 
@@ -75,8 +75,8 @@ export function AudioStrategySelector({
   });
 
   const trendingListQ = useQuery({
-    queryKey: ["trending-audios", "global"],
-    queryFn: () => getTrending({ data: { region: "global" } }),
+    queryKey: ["trending-audios", "usa"],
+    queryFn: () => getTrending({ data: { region: "usa" } }),
     enabled: value.strategy === "library" || Boolean(initialAudioId),
   });
 
@@ -251,8 +251,8 @@ export function AudioStrategySelector({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="global">Top global sound</SelectItem>
                 <SelectItem value="usa">Top USA sound</SelectItem>
+                <SelectItem value="global">Top global sound</SelectItem>
               </SelectContent>
             </Select>
 
@@ -310,7 +310,7 @@ export function AudioStrategySelector({
               {trendingAudios.length > 0 && (
                 <SelectGroup>
                   <SelectLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                    Trending TikTok Sounds
+                    Trending TikTok Sounds (USA)
                   </SelectLabel>
                   {trendingAudios.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
@@ -356,7 +356,7 @@ export function AudioStrategySelector({
                 {value.audio.title}
               </p>
               <p className="truncate text-[11px] text-muted-foreground">
-                {value.audio.author ? value.audio.author : "TikTok Trending"}
+                {value.audio.author ? value.audio.author : "TikTok Trending (USA)"}
                 {value.audio.duration_seconds ? ` • ${Math.round(value.audio.duration_seconds)}s` : ""}
               </p>
             </div>
