@@ -932,22 +932,25 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
               if (audioChoice === "or") {
                 withAudio = true;
                 audioLabel = "Original clip audio";
-              } else if (audioChoice === "tr") {
+                           } else if (audioChoice === "tr") {
                 const { data: tr } = await db()
                   .from("trending_audios")
                   .select("id, title, audio_url")
-                  .or(`user_id.eq.${link.user_id},user_id.is.null`)
-                  .order("created_at", { ascending: false })
+                  .eq("region", "usa")
+                  .neq("source", "seed_placeholder")
+                  .order("virality_score", { ascending: false })
                   .limit(1)
                   .maybeSingle();
 
                 if (tr && tr.audio_url) {
                   soundtrackUrl = tr.audio_url;
-                  audioLabel = tr.title || "Trending audio";
+                  audioLabel = tr.title || "Trending US audio";
                 } else {
                   withAudio = true;
                   audioLabel = "Original clip audio (no trending sound found)";
                 }
+              }
+
               } else if (audioChoice && audioChoice.startsWith("lb_")) {
                 const trackIdPrefix = audioChoice.slice(3);
                 const { data: tr } = await db()
