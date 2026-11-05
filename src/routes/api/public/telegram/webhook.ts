@@ -949,8 +949,7 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
                   withAudio = true;
                   audioLabel = "Original clip audio (no trending sound found)";
                 }
-              }
-
+      
               } else if (audioChoice && audioChoice.startsWith("lb_")) {
                 const trackIdPrefix = audioChoice.slice(3);
                 const { data: tr } = await db()
