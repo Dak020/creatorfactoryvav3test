@@ -1,25 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-
-/**
- * Builds the absolute redirect_uri TikTok should send the browser back to.
- * TikTok requires an exact, pre-registered match — no fuzzy/same-domain
- * matching — so this prefers an explicit env var over guessing from the
- * incoming request (which can pick the wrong origin behind a proxy/preview
- * domain and produce TikTok's opaque "redirect_uri" login error with no
- * useful detail).
- */
-function tiktokRedirectUri(): string {
-  const configured = process.env["TIKTOK_REDIRECT_URI"];
-  if (configured) return configured;
-
-  const request = getRequest();
-  const url = new URL(request!.url);
-  const forwarded = request!.headers.get("x-forwarded-host");
-  const origin = forwarded ? `https://${forwarded}` : url.origin;
-  return new URL("/oauth/tiktok/callback", origin).toString();
-}
 
 /** Is TikTok's own posting API configured for this workspace? */
 export const socialStatusFn = createServerFn({ method: "GET" })
@@ -54,14 +34,11 @@ export const listSocialAccountsFn = createServerFn({ method: "GET" })
 export const startTikTokConnectFn = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
-    const { authorizeUrl } = await import("@/lib/social/tiktok.server");
+    const { authorizeUrl, tiktokRedirectUri } = await import("@/lib/social/tiktok.server");
     const { randomUUID } = await import("node:crypto");
     const state = randomUUID();
-    const redirectUri = tiktokRedirectUri();
+    const redirectUri = await tiktokRedirectUri();
     const connectUrl = authorizeUrl(redirectUri, state);
-    // Returned so the UI can show the exact value if TikTok rejects it —
-    // this is the string that has to be registered in the TikTok app's
-    // Login Kit redirect URI list, byte for byte.
     return { connectUrl, state, redirectUri };
   });
 
@@ -75,9 +52,10 @@ export const completeTikTokConnectFn = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { code: string }) => input)
   .handler(async ({ data, context }) => {
-    const { exchangeCode, fetchProfile } = await import("@/lib/social/tiktok.server");
+    const { exchangeCode, fetchProfile, tiktokRedirectUri } = await import("@/lib/social/tiktok.server");
 
-    const tokens = await exchangeCode(data.code, tiktokRedirectUri());
+    const redirectUri = await tiktokRedirectUri();
+    const tokens = await exchangeCode(data.code, redirectUri);
     console.log("[TikTok OAuth] Granted scopes:", tokens.scope);
     if (!tokens.openId || !tokens.accessToken || !tokens.refreshToken) {
       throw new Error("TikTok did not return a complete set of tokens.");
